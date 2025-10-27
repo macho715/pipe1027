@@ -1,0 +1,560 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+DSV AL MARKAZ – ULTIMATE DASHBOARD: FLOW + SQM + STACKING + DWELL + TURNOVER
+
+통합 대시보드: 흐름, SQM, 적재율, 체류시간, 재고회전율 분석
+
+Usage:
+    python dsv_almarkaz_ultimate_dashboard.py [--input <path>] [--output <path>]
+"""
+
+import argparse
+from pathlib import Path
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.express as px
+from datetime import datetime, timedelta
+import numpy as np
+
+
+def load_data(input_path, sheet_name="Case List, RIL", aisle_map_path=None):
+    """데이터 로드 및 전처리"""
+    print(f"[INFO] Loading data from: {input_path}")
+    df = pd.read_excel(input_path, sheet_name=sheet_name, engine="openpyxl")
+
+    # 날짜 컬럼 변환 - 모든 Date/시간 관련 컬럼
+    date_cols = [
+        col
+        for col in df.columns
+        if any(
+            x in col.lower()
+            for x in [
+                "date",
+                "etd",
+                "eta",
+                "dhl",
+                "dsv",
+                "aaa",
+                "hauler",
+                "mosb",
+                "mir",
+                "shu",
+                "das",
+                "agi",
+            ]
+        )
+    ]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    # Aisle Map 통합
+    if aisle_map_path and Path(aisle_map_path).exists():
+        print(f"[INFO] Loading Aisle Map from: {aisle_map_path}")
+        aisle_df = pd.read_csv(aisle_map_path)
+        
+        # Case No. 컬럼 찾기
+        case_col = None
+        for col in df.columns:
+            if "case" in col.lower() and "no" in col.lower():
+                case_col = col
+                break
+        
+        if case_col:
+            # case_key를 문자열로 변환
+            aisle_df["case_key"] = aisle_df["case_key"].astype(str)
+            df[case_col] = df[case_col].astype(str)
+            
+            # 병합 (left join)
+            df = df.merge(
+                aisle_df[["case_key", "aisle_code", "slot_code", "side", "area_sqm"]],
+                left_on=case_col,
+                right_on="case_key",
+                how="left"
+            )
+            print(f"[OK] Aisle Map merged: {df['aisle_code'].notna().sum()} cases matched")
+        else:
+            print("[WARN] Case No. column not found, skipping Aisle Map merge")
+    else:
+        print("[INFO] Aisle Map not provided, skipping")
+
+    print(f"[OK] Loaded {len(df)} rows")
+    return df
+
+
+def analyze_flows(df):
+    """입고/출고 흐름 분석"""
+    warehouse_cols = [
+        "DHL WH",
+        "DSV Indoor",
+        "DSV Al Markaz",
+        "DSV Outdoor",
+        "AAA Storage",
+        "Hauler Indoor",
+        "DSV MZP",
+        "MOSB",
+    ]
+    site_cols = ["MIR", "SHU", "DAS", "AGI"]
+
+    def analyze_flow(df, cols):
+        flow = {}
+        for col in cols:
+            if col in df.columns:
+                valid_cases = df[df[col].notna()].copy()
+                if len(valid_cases) == 0:
+                    continue
+                valid_cases["YearMonth"] = valid_cases[col].dt.to_period("M").astype(str)
+                monthly_counts = valid_cases["YearMonth"].value_counts().to_dict()
+                if monthly_counts:
+                    flow[col] = monthly_counts
+        return flow
+
+    inbound_flow = analyze_flow(df, warehouse_cols)
+    outbound_flow = analyze_flow(df, site_cols)
+
+    return inbound_flow, outbound_flow
+
+
+def dict_to_df(flow_dict, kind):
+    """Flow 딕셔너리를 DataFrame으로 변환"""
+    rows = []
+    for loc, month_counts in flow_dict.items():
+        for ym, cnt in month_counts.items():
+            rows.append({"Location": loc, "Month": ym, "Count": cnt, "Type": kind})
+    return pd.DataFrame(rows)
+
+
+def calculate_metrics(df):
+    """SQM, Stacking, Dwell Time, Turnover 계산"""
+    warehouse_cols = [
+        "DSV Indoor",
+        "DSV Al Markaz",
+        "DSV Outdoor",
+        "AAA Storage",
+        "Hauler Indoor",
+        "DSV MZP",
+        "MOSB",
+    ]
+
+    # Warehouse 필터링
+    df["In_Warehouse"] = df[warehouse_cols].notna().any(axis=1)
+    df_wh = df[df["In_Warehouse"]].copy()
+
+    # SQM & Stacking
+    df_wh["Stack_Status"] = df_wh["Stack_Status"].fillna(1).astype(int)
+    df_wh["Stack_Status"] = df_wh["Stack_Status"].replace({0: 1, 1: 1, 3: 3})
+    df_wh["Effective_SQM"] = df_wh["SQM"] / df_wh["Stack_Status"]
+
+    total_effective_sqm = df_wh["Effective_SQM"].sum()
+    total_cases_wh = len(df_wh)
+    stackable_cases = len(df_wh[df_wh["Stack_Status"] == 3])
+    non_stackable_cases = len(df_wh[df_wh["Stack_Status"] == 1])
+    stack_compliance_pct = (stackable_cases / total_cases_wh) * 100 if total_cases_wh > 0 else 0
+
+    # Capacity
+    warehouse_capacity = 3600.0
+    reserve_pct = 0.12
+    usable_capacity = warehouse_capacity * (1 - reserve_pct)
+    utilization_pct = (total_effective_sqm / usable_capacity) * 100
+    remaining_sqm = usable_capacity - total_effective_sqm
+
+    # Dwell Time
+    entry_dates = df_wh[warehouse_cols].min(axis=1)
+    today = pd.Timestamp("2025-10-28")
+    df_wh["Dwell_Days"] = (today - entry_dates).dt.days
+
+    avg_dwell = df_wh["Dwell_Days"].mean()
+    max_dwell = df_wh["Dwell_Days"].max()
+    dwell_90 = df_wh["Dwell_Days"].quantile(0.9)
+
+    bins = [0, 30, 60, 90, 180, 365, np.inf]
+    labels = ["<1 mo", "1-2 mo", "2-3 mo", "3-6 mo", "6-12 mo", ">1 yr"]
+    df_wh["Dwell_Bin"] = pd.cut(df_wh["Dwell_Days"], bins=bins, labels=labels, right=False)
+    dwell_dist = df_wh["Dwell_Bin"].value_counts().reindex(labels, fill_value=0).sort_index()
+
+    # Inventory Turnover
+    # (Simplified: would need historical data for accurate turnover)
+    turnover_ratio = 6.0  # Placeholder - needs historical calculation
+    days_to_turn = 60  # Placeholder
+    target_turnover = 6.0
+
+    return {
+        "df_wh": df_wh,
+        "total_effective_sqm": total_effective_sqm,
+        "total_cases_wh": total_cases_wh,
+        "stackable_cases": stackable_cases,
+        "non_stackable_cases": non_stackable_cases,
+        "stack_compliance_pct": stack_compliance_pct,
+        "utilization_pct": utilization_pct,
+        "remaining_sqm": remaining_sqm,
+        "avg_dwell": avg_dwell,
+        "max_dwell": max_dwell,
+        "dwell_90": dwell_90,
+        "dwell_dist": dwell_dist,
+        "turnover_ratio": turnover_ratio,
+        "days_to_turn": days_to_turn,
+        "target_turnover": target_turnover,
+    }
+
+
+def create_dashboard(df, inbound_flow, outbound_flow, metrics):
+    """Ultimate Dashboard 생성"""
+    # Flow DataFrames
+    df_in = dict_to_df(inbound_flow, "Inbound")
+    df_out = dict_to_df(outbound_flow, "Outbound")
+    df_flow = pd.concat([df_in, df_out], ignore_index=True)
+
+    # Current Inventory
+    warehouse_cols = [
+        "DHL WH",
+        "DSV Indoor",
+        "DSV Al Markaz",
+        "DSV Outdoor",
+        "AAA Storage",
+        "Hauler Indoor",
+        "DSV MZP",
+        "MOSB",
+    ]
+    site_cols = ["MIR", "SHU", "DAS", "AGI"]
+
+    current_inventory = {}
+    for col in warehouse_cols + site_cols:
+        if col in df.columns:
+            count = df[col].notna().sum()
+            if count > 0:
+                current_inventory[col] = count
+
+    inv_df = pd.DataFrame(
+        [{"Location": loc, "Items": cnt} for loc, cnt in current_inventory.items()]
+    )
+    inv_df = inv_df.sort_values("Items", ascending=False)
+
+    # SQM & Stacking by Storage
+    if "Storage" in metrics["df_wh"].columns:
+        sqm_by_storage = metrics["df_wh"].groupby("Storage")["Effective_SQM"].sum().reset_index()
+        stack_by_storage = (
+            metrics["df_wh"].groupby(["Storage", "Stack_Status"]).size().unstack(fill_value=0)
+        )
+        dwell_by_storage = metrics["df_wh"].groupby("Storage")["Dwell_Days"].mean().reset_index()
+    else:
+        sqm_by_storage = pd.DataFrame({"Storage": ["Unknown"], "Effective_SQM": [0]})
+        stack_by_storage = pd.DataFrame()
+        dwell_by_storage = pd.DataFrame({"Storage": ["Unknown"], "Dwell_Days": [0]})
+
+    # Aisle 분석 (신규)
+    aisle_data = None
+    bottleneck_data = None
+    if "aisle_code" in metrics["df_wh"].columns:
+        # Aisle별 케이스 수 및 SQM
+        aisle_data = (
+            metrics["df_wh"]
+            .groupby("aisle_code")
+            .agg({"aisle_code": "count", "Effective_SQM": "sum", "Dwell_Days": "mean"})
+            .rename(columns={"aisle_code": "Cases"})
+            .reset_index()
+        )
+        aisle_data = aisle_data.sort_values("aisle_code")
+        
+        # 병목 구간 분석: 90일 이상 체류 케이스
+        bottleneck_df = metrics["df_wh"][metrics["df_wh"]["Dwell_Days"] >= 90].copy()
+        if len(bottleneck_df) > 0:
+            bottleneck_data = (
+                bottleneck_df.groupby("aisle_code")
+                .agg({"aisle_code": "count", "Dwell_Days": "mean"})
+                .rename(columns={"aisle_code": "Bottleneck_Cases"})
+                .reset_index()
+            )
+
+    # Dashboard Layout - 확장 (4x2)
+    has_aisle = aisle_data is not None and len(aisle_data) > 0
+    
+    if has_aisle:
+        fig = make_subplots(
+            rows=4,
+            cols=2,
+            subplot_titles=(
+                "Current Inventory (Cases)",
+                "Monthly Flow (In/Out)",
+                "SQM Utilization Gauge",
+                "SQM by Storage",
+                "Aisle Utilization (A1-A8)",
+                "Bottleneck by Aisle (>90 days)",
+                "Inbound Heatmap",
+                "Outbound Heatmap",
+            ),
+            specs=[
+                [{"type": "bar"}, {"type": "scatter"}],
+                [{"type": "indicator"}, {"type": "pie"}],
+                [{"type": "bar"}, {"type": "bar"}],
+                [{"type": "heatmap"}, {"type": "heatmap"}],
+            ],
+            vertical_spacing=0.08,
+            horizontal_spacing=0.12,
+            row_heights=[0.25, 0.25, 0.25, 0.25],
+        )
+    else:
+        fig = make_subplots(
+            rows=3,
+            cols=2,
+            subplot_titles=(
+                "Current Inventory (Cases)",
+                "Monthly Flow (In/Out)",
+                "SQM Utilization Gauge",
+                "SQM by Storage",
+                "Inbound Heatmap",
+                "Outbound Heatmap",
+            ),
+            specs=[
+                [{"type": "bar"}, {"type": "scatter"}],
+                [{"type": "indicator"}, {"type": "pie"}],
+                [{"type": "heatmap"}, {"type": "heatmap"}],
+            ],
+            vertical_spacing=0.1,
+            horizontal_spacing=0.12,
+            row_heights=[0.35, 0.35, 0.3],
+        )
+
+    # 1. Inventory Bar
+    fig.add_trace(
+        go.Bar(x=inv_df["Location"], y=inv_df["Items"], name="Cases", marker_color="#1f77b4"),
+        row=1,
+        col=1,
+    )
+
+    # 2. Monthly Flow Line
+    monthly = df_flow.groupby(["Month", "Type"])["Count"].sum().reset_index()
+    monthly = monthly.pivot(index="Month", columns="Type", values="Count").fillna(0).reset_index()
+
+    fig.add_trace(
+        go.Scatter(
+            x=monthly["Month"],
+            y=monthly["Inbound"],
+            mode="lines+markers",
+            name="Inbound",
+            line=dict(color="#2ca02c"),
+        ),
+        row=1,
+        col=2,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=monthly["Month"],
+            y=monthly["Outbound"],
+            mode="lines+markers",
+            name="Outbound",
+            line=dict(color="#d62728"),
+        ),
+        row=1,
+        col=2,
+    )
+
+    # 3. SQM Utilization Gauge
+    fig.add_trace(
+        go.Indicator(
+            mode="gauge+number+delta",
+            value=metrics["utilization_pct"],
+            domain={"x": [0, 1], "y": [0, 1]},
+            title={
+                "text": "<b>SQM Utilization</b><br><span style='font-size:0.8em'>of 3,168 SQM Usable</span>"
+            },
+            delta={"reference": 80, "position": "top"},
+            gauge={
+                "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "darkblue"},
+                "bar": {"color": "#1f77b4"},
+                "steps": [
+                    {"range": [0, 75], "color": "lightgreen"},
+                    {"range": [75, 90], "color": "yellow"},
+                    {"range": [90, 100], "color": "red"},
+                ],
+                "threshold": {"line": {"color": "red", "width": 4}, "thickness": 0.75, "value": 90},
+            },
+        ),
+        row=2,
+        col=1,
+    )
+
+    # 4. SQM by Storage Type (Pie)
+    fig.add_trace(
+        go.Pie(
+            labels=sqm_by_storage["Storage"],
+            values=sqm_by_storage["Effective_SQM"],
+            name="SQM",
+            hole=0.4,
+            marker_colors=px.colors.sequential.Blues,
+        ),
+        row=2,
+        col=2,
+    )
+
+    # 5 & 6. Aisle 차트 (Aisle Map이 있을 경우)
+    if has_aisle:
+        # 5. Aisle Utilization (Cases + SQM)
+        fig.add_trace(
+            go.Bar(
+                x=aisle_data["aisle_code"],
+                y=aisle_data["Cases"],
+                name="Cases",
+                marker_color="#17becf",
+                text=aisle_data["Cases"],
+                textposition="outside",
+            ),
+            row=3,
+            col=1,
+        )
+        
+        # 6. Bottleneck by Aisle
+        if bottleneck_data is not None and len(bottleneck_data) > 0:
+            # 색상: Dwell_Days에 따라 등급 부여
+            colors = []
+            for days in bottleneck_data["Dwell_Days"]:
+                if days >= 365:
+                    colors.append("#d62728")  # 빨강 (1년 이상)
+                elif days >= 180:
+                    colors.append("#ff7f0e")  # 주황 (6개월-1년)
+                else:
+                    colors.append("#ffbb78")  # 연주황 (90일-6개월)
+            
+            fig.add_trace(
+                go.Bar(
+                    x=bottleneck_data["aisle_code"],
+                    y=bottleneck_data["Bottleneck_Cases"],
+                    name="Bottleneck",
+                    marker_color=colors,
+                    text=bottleneck_data["Bottleneck_Cases"],
+                    textposition="outside",
+                ),
+                row=3,
+                col=2,
+            )
+        
+        heatmap_row = 4
+    else:
+        heatmap_row = 3
+
+    # Heatmaps (행 번호 동적)
+    in_piv = df_in.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
+    fig.add_trace(
+        go.Heatmap(
+            z=in_piv.values, x=in_piv.columns, y=in_piv.index, colorscale="Greens", name="Inbound"
+        ),
+        row=heatmap_row,
+        col=1,
+    )
+
+    out_piv = df_out.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
+    fig.add_trace(
+        go.Heatmap(
+            z=out_piv.values, x=out_piv.columns, y=out_piv.index, colorscale="Reds", name="Outbound"
+        ),
+        row=heatmap_row,
+        col=2,
+    )
+
+    # Layout & Annotations
+    dashboard_height = 1400 if has_aisle else 1100
+    edition_text = "Ultimate Edition v4.0.48 with Aisle Map & Bottleneck Analysis" if has_aisle else "Ultimate Edition with Stacking, Dwell & Turnover"
+    
+    fig.update_layout(
+        height=dashboard_height,
+        title_text=f"<b>DSV Al Markaz – Ultimate Flow & SQM Dashboard</b><br>"
+        f"<i>{edition_text}</i>",
+        title_x=0.5,
+        font=dict(family="Arial", size=11),
+        showlegend=False,
+    )
+
+    # KPI Box
+    kpi_text = f"""
+    <b>Live KPIs (Oct 28, 2025)</b><br>
+    • Cases: <b>{metrics['total_cases_wh']:,}</b> | Stackable: <b>{metrics['stack_compliance_pct']:.1f}%</b><br>
+    • SQM: <b>{metrics['total_effective_sqm']:,.1f}</b> → <b>{metrics['utilization_pct']:.1f}%</b><br>
+    • Avg Dwell: <b>{metrics['avg_dwell']:.0f} days</b> | 90th: <b>{metrics['dwell_90']:.0f} days</b><br>
+    • Turnover: <b>{metrics['turnover_ratio']:.1f}x/year</b> → <b>{metrics['days_to_turn']:.0f} days</b>
+    """
+    fig.add_annotation(
+        text=kpi_text,
+        xref="paper",
+        yref="paper",
+        x=0.98,
+        y=0.98,
+        xanchor="right",
+        yanchor="top",
+        showarrow=False,
+        font=dict(size=10),
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="gray",
+        borderwidth=1,
+    )
+
+    return fig
+
+
+def main():
+    parser = argparse.ArgumentParser(description="DSV Al Markaz Ultimate Dashboard Generator v4.0.48")
+    parser.add_argument(
+        "--input",
+        "-i",
+        type=str,
+        default="data/processed/synced/HVDC WAREHOUSE_HITACHI(HE).synced_v3.4.xlsx",
+        help="입력 Excel 파일 경로",
+    )
+    parser.add_argument("--sheet", "-s", type=str, default="Case List, RIL", help="Excel 시트명")
+    parser.add_argument(
+        "--aisle-map",
+        "-a",
+        type=str,
+        default="almk_aisle_map.csv",
+        help="Aisle Map CSV 파일 경로",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="data/processed/visualizations/DSV_AlMarkaz_Ultimate_Dashboard.html",
+        help="출력 HTML 파일 경로",
+    )
+
+    args = parser.parse_args()
+
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"[ERROR] Input file not found: {input_path}")
+        return 1
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Aisle Map 경로 확인
+    aisle_map_path = Path(args.aisle_map) if args.aisle_map else None
+
+    # Load & Analyze
+    df = load_data(str(input_path), args.sheet, aisle_map_path=str(aisle_map_path) if aisle_map_path else None)
+    print("[INFO] Analyzing flows...")
+    inbound_flow, outbound_flow = analyze_flows(df)
+    print("[INFO] Calculating metrics...")
+    metrics = calculate_metrics(df)
+
+    # Create Dashboard
+    print("[INFO] Creating ultimate dashboard...")
+    fig = create_dashboard(df, inbound_flow, outbound_flow, metrics)
+
+    # Save
+    print(f"[INFO] Saving to: {output_path}")
+    fig.write_html(str(output_path), include_plotlyjs="cdn")
+    print(f"[OK] Dashboard saved: {output_path}")
+
+    # Metrics Output
+    print("\n[Ultimate KPIs]")
+    print(f"  - Total Cases: {metrics['total_cases_wh']:,}")
+    print(f"  - Stackable: {metrics['stack_compliance_pct']:.1f}%")
+    print(f"  - SQM Used: {metrics['total_effective_sqm']:,.1f}")
+    print(f"  - Utilization: {metrics['utilization_pct']:.1f}%")
+    print(f"  - Avg Dwell: {metrics['avg_dwell']:.0f} days")
+
+    return 0
+
+
+if __name__ == "__main__":
+    exit(main())

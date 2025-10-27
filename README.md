@@ -1,10 +1,37 @@
-# HVDC Pipeline v4.0.47
+# HVDC Pipeline v4.0.48
 
 **Samsung C&T Logistics | ADNOC·DSV Partnership**
 
 통합된 HVDC 파이프라인으로 데이터 동기화부터 이상치 탐지까지 전체 프로세스를 자동화합니다.
 
 ## 🚀 최근 업데이트
+
+### v4.0.48 - DSV Al Markaz Dashboard Ultimate Edition (2025-10-28)
+
+#### ✨ Aisle Map 통합 & 병목 구간 분석
+
+**새 기능**
+- **Aisle Map 통합**: A1-A8 Aisle별 케이스 분포 시각화 (523 cases matched)
+- **병목 구간 분석**: 90일 이상 체류 케이스를 Aisle별로 색상 코드로 표시
+  - 빨강(1년+), 주황(6개월-1년), 연주황(3-6개월)
+- **대시보드 확장**: 3x2 → 4x2 레이아웃 (8개 차트)
+
+**실행 방법**
+```bash
+python scripts/analysis/dsv_almarkaz_ultimate_dashboard.py
+# 또는 커스텀 Aisle Map 지정
+python scripts/analysis/dsv_almarkaz_ultimate_dashboard.py --aisle-map custom_map.csv
+```
+
+**KPI 결과**
+- Total Cases: 5,039 | Stackable: 13.6% | SQM Used: 18,260.3
+- Utilization: 576.4% | Avg Dwell: 297 days
+
+**Files Modified**
+- `scripts/analysis/dsv_almarkaz_ultimate_dashboard.py` (Aisle Map 로직 통합)
+- `almk_aisle_map.csv` (신규 데이터 소스)
+
+---
 
 ### v4.0.47 - Stage 1 색상 적용 버그 수정 (2025-10-27)
 
