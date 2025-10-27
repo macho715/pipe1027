@@ -147,7 +147,6 @@ class Change:
     new_value: Any
     change_type: str  # "date_update" | "field_update" | "new_record"
     semantic_key: str = ""  # ✅ Phase 1: Semantic key for flexible column mapping
-    case_no: str = ""  # ✅ Phase 4: Case No. for correct row lookup after reordering
 
 
 @dataclass
@@ -177,7 +176,6 @@ class ChangeTracker:
                 new_value=kw.get("new_value"),
                 change_type=str(kw.get("change_type", "field_update")),
                 semantic_key=str(kw.get("semantic_key", "")),  # ✅ Phase 2: Include semantic_key
-                case_no=str(kw.get("case_no", "")),  # ✅ Phase 4: Include case_no for row lookup
             )
         )
 
@@ -1089,28 +1087,17 @@ class DataSynchronizerV30:
 
         idx: Dict[str, int] = {}
 
-        for i, val in enumerate(df[case_col]):
-            # Use the new helper for consistent normalization
-            v = self._normalize_case_no(val)
-            if not v:  # Skip empty values
+        # Normalize case numbers: uppercase, remove special characters
+        series = df[case_col].fillna("").astype(str).str.strip().str.upper()
+        series = series.apply(lambda x: re.sub(r"[^A-Z0-9]", "", x))
+
+        for i, v in enumerate(series.tolist()):
+            if not v:
                 continue
             if v not in idx:  # Keep first occurrence
                 idx[v] = i
 
         return idx
-
-    def _normalize_case_no(self, case_no: Any) -> str:
-        """
-        Case No.를 일관된 형식으로 정규화합니다.
-        (대문자, 공백 제거, 영숫자만 남김)
-        """
-        import re
-
-        if pd.isna(case_no) or case_no is None:
-            return ""
-        # 문자열로 변환, 공백 제거, 대문자 변환 후 영숫자가 아닌 문자 모두 제거
-        normalized = re.sub(r"[^A-Z0-9]", "", str(case_no).strip().upper())
-        return normalized
 
     def _apply_master_order_sorting(
         self,
@@ -1258,9 +1245,13 @@ class DataSynchronizerV30:
 
         # Process each master row
         for mi, mrow in master.iterrows():
-            # Get case number using consistent normalization
-            key = self._normalize_case_no(mrow[master_case_col])
-            if not key:  # Skip if case number is empty after normalization
+            # Get case number
+            key = (
+                str(mrow[master_case_col]).strip().upper()
+                if pd.notna(mrow[master_case_col])
+                else ""
+            )
+            if not key:
                 continue
 
             # Check if case exists in warehouse
@@ -1347,7 +1338,6 @@ class DataSynchronizerV30:
                                 row_index=wi,
                                 column_name=w_col,
                                 semantic_key=semantic_key,  # ✅ Phase 3
-                                case_no=key,  # ✅ Phase 4: Include case_no for correct row lookup
                                 old_value=wval,
                                 new_value=mval,
                                 change_type="date_update",
@@ -1366,7 +1356,6 @@ class DataSynchronizerV30:
                                 row_index=wi,
                                 column_name=w_col,
                                 semantic_key=semantic_key,  # ✅ Phase 3
-                                case_no=key,  # ✅ Phase 4: Include case_no
                                 old_value=wval,
                                 new_value=mval,
                                 change_type="field_update",
@@ -1392,7 +1381,6 @@ class DataSynchronizerV30:
                             row_index=wi,
                             column_name=m_col,
                             semantic_key=semantic_key,  # ✅ Phase 3
-                            case_no=key,  # ✅ Phase 4: Include case_no
                             old_value=old_val,
                             new_value=mval,
                             change_type="master_only_update",
@@ -1605,7 +1593,7 @@ class DataSynchronizerV30:
                 )
             )
 
-            # Save all sheets with color formatting
+            # Save all sheets
             print(f"  Writing to: {Path(out).name}")
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
                 for sheet_name, (df, header_row) in processed_sheets.items():
@@ -1614,22 +1602,22 @@ class DataSynchronizerV30:
                         :31
                     ]  # Excel limit
                     df.to_excel(writer, sheet_name=clean_sheet_name, index=False)
-                    print(f"    - Wrote sheet '{clean_sheet_name}' with {len(df)} rows")
+                    print(f"    - {clean_sheet_name}: {len(df)} rows")
 
-                print(f"\n  Applying color formatting before saving...")
-                # Get the openpyxl workbook object from the writer
-                wb = writer.book
+            print(f"  [OK] Saved {len(processed_sheets)} sheets")
 
-                # Apply color formatting to all sheets
-                for sheet_name, (df, header_row) in processed_sheets.items():
-                    clean_sheet_name = sheet_name.replace("/", "_").replace("\\", "_")[:31]
-                    if sheet_name in sheet_change_trackers:
-                        self.change_tracker = sheet_change_trackers[sheet_name]
-                        ws = wb[clean_sheet_name]
-                        self._apply_excel_formatting(wb, ws, header_row)
-                    else:
-                        print(f"    - Skipping formatting for '{clean_sheet_name}' (no changes)")
-            print(f"  [OK] File saved with formatting: {Path(out).name}")
+            # Apply color formatting to all sheets
+            print(f"  Applying color formatting...")
+            for sheet_name, (df, header_row) in processed_sheets.items():
+                clean_sheet_name = sheet_name.replace("/", "_").replace("\\", "_")[:31]
+                # ✅ Use the sheet-specific change tracker
+                if sheet_name in sheet_change_trackers:
+                    self.change_tracker = sheet_change_trackers[sheet_name]
+                    print(f"    - {clean_sheet_name}: {len(self.change_tracker.changes)} changes")
+                    self._apply_excel_formatting(out, clean_sheet_name, header_row)
+                else:
+                    print(f"    - {clean_sheet_name}: No change tracker (skipped)")
+            print(f"  [OK] Formatting applied to all sheets")
 
             # Create merged file (NEW: Single sheet with all data combined)
             print(f"\n[INFO] 합쳐진 단일시트 파일 생성 중...")
@@ -1738,25 +1726,33 @@ class DataSynchronizerV30:
 
         return None
 
-    def _apply_excel_formatting(self, wb, ws, header_row: int):
+    def _apply_excel_formatting(self, excel_file: str, sheet_name: str, header_row: int):
         """
-        Apply color formatting to Excel worksheet to highlight changes.
+        Apply color formatting to the Excel file to highlight changes.
 
         Args:
-            wb: openpyxl Workbook object
-            ws: openpyxl Worksheet object
+            excel_file: Path to the Excel file
+            sheet_name: Name of the sheet to format
             header_row: Row index where headers start (0-based from pandas)
         """
         try:
-            sheet_name = ws.title
             # Early return if no changes to apply
             if not self.change_tracker.changes:
-                print(f"      [DEBUG] No changes to apply for '{sheet_name}'")
+                print(f"      [DEBUG] No changes to apply for {sheet_name}")
                 return
 
             print(
-                f"      [DEBUG] Applying {len(self.change_tracker.changes)} changes to sheet '{sheet_name}'"
+                f"      [DEBUG] Applying {len(self.change_tracker.changes)} changes to {sheet_name}"
             )
+            print(f"      [DEBUG] Target file: {excel_file}")
+
+            # ✅ Load without data_only to preserve formatting
+            wb = load_workbook(excel_file, data_only=False)
+            if sheet_name not in wb.sheetnames:
+                print(f"      [DEBUG] Sheet {sheet_name} not found in {wb.sheetnames}")
+                return
+
+            ws = wb[sheet_name]
 
             # Excel rows are 1-indexed, and we need to account for header
             excel_header_row = header_row + 1
@@ -1764,37 +1760,20 @@ class DataSynchronizerV30:
 
             # Build header map
             header_map = {}
-            case_no_col_idx = None
             for c_idx, cell in enumerate(ws[excel_header_row], start=1):
                 if cell.value is None:
                     continue
-                header_name = str(cell.value).strip()
-                header_map[header_name] = c_idx
-
-                # Find Case No. column
-                if "Case" in header_name and "No" in header_name:
-                    case_no_col_idx = c_idx
+                header_map[str(cell.value).strip()] = c_idx
 
             print(
                 f"      [DEBUG] Header map size: {len(header_map)}, first 5: {list(header_map.keys())[:5]}"
             )
-            print(f"      [DEBUG] Case No. column index: {case_no_col_idx}")
-
-            # ✅ Phase 4: Build Case No. → Excel row mapping
-            case_to_row = {}
-            if case_no_col_idx:
-                for row_idx in range(excel_header_row + 1, ws.max_row + 1):
-                    case_no_cell = ws.cell(row=row_idx, column=case_no_col_idx)
-                    if case_no_cell.value:
-                        case_to_row[str(case_no_cell.value).strip()] = row_idx
-                print(f"      [DEBUG] Built case_to_row mapping: {len(case_to_row)} cases")
 
             # Define fills
             orange_fill = PatternFill(start_color=ORANGE, end_color=ORANGE, fill_type="solid")
             yellow_fill = PatternFill(start_color=YELLOW, end_color=YELLOW, fill_type="solid")
 
             # ✅ Phase 4: Apply date changes (orange) with 3-level Fallback
-            # Apply date changes (orange) with 3-level Fallback
             orange_applied = 0
             match_by_semantic = 0
             match_by_exact = 0
@@ -1805,16 +1784,7 @@ class DataSynchronizerV30:
                 if change.change_type != "date_update":
                     continue
 
-                # ✅ Phase 4: Use Case No. to find correct row after reordering
-                if change.case_no and change.case_no in case_to_row:
-                    excel_row = case_to_row[change.case_no]
-                else:
-                    # Fallback to old method if case_no not available
-                    excel_row = change.row_index + excel_header_row + 1
-                    if change.case_no:
-                        print(
-                            f"      [WARN] Case No. '{change.case_no}' not found in case_to_row mapping, using fallback row {excel_row}"
-                        )
+                excel_row = change.row_index + excel_header_row + 1
 
                 # Level 1: Use semantic key mapping (most accurate)
                 actual_col_name = self.change_tracker.get_column_name(
@@ -1860,51 +1830,67 @@ class DataSynchronizerV30:
 
             print(f"      [DEBUG] Yellow cells applied: {yellow_applied}")
 
-            # In-memory verification
-            def _matches_color(fill: PatternFill, targets: Tuple[str, ...]) -> bool:
-                if not fill:
-                    return False
-                color = getattr(fill, "start_color", None)
-                candidates: List[str] = []
-                if color is not None:
-                    rgb = str(getattr(color, "rgb", "") or "").upper()
-                    if rgb:
-                        candidates.append(rgb)
-                    indexed = getattr(color, "indexed", None)
-                    if isinstance(indexed, str):
-                        candidates.append(indexed.upper())
-                fg_color = getattr(fill, "fgColor", None)
-                if fg_color is not None:
-                    fg_rgb = str(getattr(fg_color, "rgb", "") or "").upper()
-                    if fg_rgb:
-                        candidates.append(fg_rgb)
-                return any(
-                    any(target in candidate for target in targets) for candidate in candidates
-                )
+            # ✅ Save with explicit close to ensure colors persist
+            wb.save(excel_file)
+            wb.close()
+            print(f"      [DEBUG] File saved and closed")
 
-            # In-memory color verification
-            verify_orange = 0
-            for row_idx, col_idx in orange_cells:
-                cell = ws.cell(row=row_idx, column=col_idx)
-                if _matches_color(cell.fill, ("FFFFC000", "FFC000", "00FFC000")):
-                    verify_orange += 1
+            # ✅ 즉시 검증: 저장된 파일을 다시 읽어 색상 확인
+            try:
 
-            verify_yellow = 0
-            for row_idx, col_idx in yellow_cells:
-                cell = ws.cell(row=row_idx, column=col_idx)
-                if _matches_color(cell.fill, ("FFFFFF00", "FFFF00", "00FFFF00")):
-                    verify_yellow += 1
+                def _matches_color(fill: PatternFill, targets: Tuple[str, ...]) -> bool:
+                    if not fill:
+                        return False
+                    color = getattr(fill, "start_color", None)
+                    candidates: List[str] = []
+                    if color is not None:
+                        rgb = str(getattr(color, "rgb", "") or "").upper()
+                        if rgb:
+                            candidates.append(rgb)
+                        indexed = getattr(color, "indexed", None)
+                        if isinstance(indexed, str):
+                            candidates.append(indexed.upper())
+                    fg_color = getattr(fill, "fgColor", None)
+                    if fg_color is not None:
+                        fg_rgb = str(getattr(fg_color, "rgb", "") or "").upper()
+                        if fg_rgb:
+                            candidates.append(fg_rgb)
+                    return any(
+                        any(target in candidate for target in targets) for candidate in candidates
+                    )
 
-            print(f"      [VERIFY] In-memory color check for '{sheet_name}':")
-            print(f"        - Orange: {verify_orange}/{orange_applied}")
-            print(f"        - Yellow: {verify_yellow}/{yellow_applied}")
+                wb_verify = load_workbook(excel_file, data_only=False)
+                ws_verify = wb_verify[sheet_name]
 
-            if verify_orange < orange_applied:
-                missing = orange_applied - verify_orange
-                print(f"        WARNING: Orange color mismatch on {missing} cells!")
-            if verify_yellow < yellow_applied:
-                missing = yellow_applied - verify_yellow
-                print(f"        WARNING: Yellow color mismatch on {missing} cells!")
+                verify_orange = 0
+                for row_idx, col_idx in orange_cells:
+                    cell = ws_verify.cell(row=row_idx, column=col_idx)
+                    if _matches_color(cell.fill, ("FFFFC000", "FFC000", "00FFC000")):
+                        verify_orange += 1
+
+                verify_yellow = 0
+                for row_idx, col_idx in yellow_cells:
+                    cell = ws_verify.cell(row=row_idx, column=col_idx)
+                    if _matches_color(cell.fill, ("FFFFFF00", "FFFF00", "00FFFF00")):
+                        verify_yellow += 1
+
+                print(f"      [VERIFY] Saved file color check:")
+                print(f"        - Orange: {verify_orange}")
+                print(f"        - Yellow: {verify_yellow}")
+
+                if verify_orange < orange_applied:
+                    missing = orange_applied - verify_orange
+                    if missing > 0:
+                        print(f"        WARNING: Orange color mismatch on {missing} cells!")
+                if verify_yellow < yellow_applied:
+                    missing = yellow_applied - verify_yellow
+                    if missing > 0:
+                        print(f"        WARNING: Yellow color mismatch on {missing} cells!")
+
+                wb_verify.close()
+
+            except Exception as verify_error:
+                print(f"      [VERIFY] 검증 실패: {verify_error}")
 
         except Exception as e:
             print(f"  Warning: Formatting failed: {e}")
