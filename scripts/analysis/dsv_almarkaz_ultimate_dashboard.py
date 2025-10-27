@@ -28,6 +28,16 @@ except ImportError:
     print("[WARN] Forecasting module not available, forecast features disabled")
     forecast_warehouse_demand = None
 
+try:
+    from pareto_analyzer import calculate_pareto_analysis, calculate_aisle_occupancy
+except ImportError:
+    try:
+        from scripts.analysis.pareto_analyzer import calculate_pareto_analysis, calculate_aisle_occupancy
+    except ImportError:
+        print("[WARN] Pareto analyzer not available, Pareto features disabled")
+        calculate_pareto_analysis = None
+        calculate_aisle_occupancy = None
+
 
 def load_data(input_path, sheet_name="Case List, RIL", aisle_map_path=None):
     """데이터 로드 및 전처리"""
@@ -277,10 +287,27 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 .reset_index()
             )
 
+    # Pareto 분석 데이터 생성 (pareto 모듈이 있을 경우)
+    pareto_result = None
+    has_pareto = calculate_pareto_analysis is not None and calculate_aisle_occupancy is not None
+
+    if has_pareto and "aisle_code" in metrics["df_wh"].columns and "area_sqm" in metrics["df_wh"].columns:
+        try:
+            print("[INFO] Calculating Pareto analysis...")
+            # Aisle 점유율 계산
+            aisle_occupancy = calculate_aisle_occupancy(metrics["df_wh"])
+            
+            # Pareto 분석 실행
+            pareto_result = calculate_pareto_analysis(aisle_occupancy, threshold=80.0)
+            print(f"[OK] Pareto analysis complete: {len(pareto_result['pareto_aisles'])} priority aisles")
+        except Exception as e:
+            print(f"[WARN] Pareto analysis failed: {e}")
+            has_pareto = False
+
     # 예측 데이터 생성 (forecast 모듈이 있을 경우)
     forecast_data = None
     has_forecast = forecast_warehouse_demand is not None
-    
+
     if has_forecast and "Effective_SQM" in metrics["df_wh"].columns:
         try:
             print("[INFO] Generating forecasts...")
@@ -289,7 +316,7 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
             df_wh_monthly["Month"] = pd.Timestamp("2025-10-28")  # Current date placeholder
             monthly_sqm = df_wh_monthly.groupby("Month")["Effective_SQM"].sum().reset_index()
             monthly_sqm.rename(columns={"Month": "Date", "Effective_SQM": "CBM"}, inplace=True)
-            
+
             # 예측 실행 (90일 = 3개월)
             if len(monthly_sqm) > 0:
                 cbm_fc, _, cost_fc = forecast_warehouse_demand(
@@ -298,21 +325,52 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                     date_col="Date",
                     horizon=90,
                     confidence=0.90,
-                    rate_per_sqm=47.0
+                    rate_per_sqm=47.0,
                 )
-                forecast_data = {
-                    "cbm": cbm_fc.df,
-                    "cost": cost_fc
-                }
+                forecast_data = {"cbm": cbm_fc.df, "cost": cost_fc}
                 print(f"[OK] Forecast generated: {len(cbm_fc.df)} days")
         except Exception as e:
             print(f"[WARN] Forecast generation failed: {e}")
             has_forecast = False
 
-    # Dashboard Layout - 확장 (4x2 또는 5x2)
+    # Dashboard Layout - 확장 (4x2, 5x2, 또는 6x2)
     has_aisle = aisle_data is not None and len(aisle_data) > 0
 
-    if has_aisle and has_forecast:
+    if has_aisle and has_forecast and has_pareto:
+        # 7x2 레이아웃 (Aisle + Forecast + Pareto + Heatmap)
+        fig = make_subplots(
+            rows=7,
+            cols=2,
+            subplot_titles=(
+                "Current Inventory (Cases)",
+                "Monthly Flow (In/Out)",
+                "SQM Utilization Gauge",
+                "SQM by Storage",
+                "Aisle Utilization (A1-A8)",
+                "Bottleneck by Aisle (>90 days)",
+                "SQM Forecast (Next 90 Days)",
+                "Cost Forecast (Next 90 Days)",
+                "Pareto Analysis - Aisle Occupancy",
+                "Cumulative % (80/20 Rule)",
+                "Optimization Recommendations",
+                "",
+                "Inbound Heatmap",
+                "Outbound Heatmap",
+            ),
+            specs=[
+                [{"type": "bar"}, {"type": "scatter"}],
+                [{"type": "indicator"}, {"type": "pie"}],
+                [{"type": "bar"}, {"type": "bar"}],
+                [{"type": "scatter"}, {"type": "scatter"}],
+                [{"type": "bar"}, {"type": "scatter"}],
+                [{"type": "table", "colspan": 2}, None],
+                [{"type": "heatmap"}, {"type": "heatmap"}],
+            ],
+            vertical_spacing=0.04,
+            horizontal_spacing=0.12,
+            row_heights=[0.13, 0.13, 0.13, 0.13, 0.13, 0.20, 0.15],
+        )
+    elif has_aisle and has_forecast:
         # 5x2 레이아웃 (Aisle + Forecast)
         fig = make_subplots(
             rows=5,
@@ -557,12 +615,91 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 row=4,
                 col=2,
             )
-            
-            heatmap_row = 5
+
+            # For 7x2 layout (with Pareto), heatmaps on row 7
+            heatmap_row = 7 if (has_pareto and pareto_result is not None) else 6
         else:
-            heatmap_row = 4
+            heatmap_row = 5 if has_pareto else 4
     else:
-        heatmap_row = 3
+        heatmap_row = 5 if has_pareto else 3
+
+    # 9 & 10. Pareto 차트 (Pareto 분석이 있을 경우)
+    if has_pareto and pareto_result is not None and (has_aisle and has_forecast):
+        pareto_df = pareto_result["cumulative_data"]
+        
+        # 9. Pareto 막대 차트 (Aisle별 점유 SQM) - Row 5 (6x2 레이아웃)
+        fig.add_trace(
+            go.Bar(
+                x=pareto_df["aisle"],
+                y=pareto_df["occupied_sqm"],
+                name="Occupied SQM",
+                marker_color="#1f77b4",
+                text=pareto_df["occupied_sqm"].round(1),
+                textposition="outside",
+            ),
+            row=5,
+            col=1,
+        )
+        
+        # 10. 누적 % 선 차트 - Row 5 (6x2 레이아웃)
+        fig.add_trace(
+            go.Scatter(
+                x=pareto_df["aisle"],
+                y=pareto_df["cumulative_percentage"],
+                mode="lines+markers",
+                name="Cumulative %",
+                line=dict(color="red", width=2),
+                marker=dict(size=8, color="red"),
+            ),
+            row=5,
+            col=2,
+        )
+        
+        # 80% 기준선
+        fig.add_hline(
+            y=80,
+            line_dash="dash",
+            line_color="green",
+            annotation_text="80% Threshold",
+            annotation_position="right",
+            row=5,
+            col=2,
+        )
+        
+        # 11. 권장사항 테이블 - Row 6 (6x2 레이아웃)
+        if pareto_result["recommendations"]:
+            recommendations_list = pareto_result["recommendations"]
+            
+            # 우선순위 추출 (첫 글자만)
+            priorities = []
+            for rec in recommendations_list:
+                if "Priority" in rec or "Priority" in rec:
+                    priorities.append("High")
+                elif "Capacity" in rec or "Capacity" in rec:
+                    priorities.append("Medium")
+                elif "Available" in rec or "Available" in rec:
+                    priorities.append("Low")
+                else:
+                    priorities.append("Info")
+            
+            fig.add_trace(
+                go.Table(
+                    header=dict(
+                        values=["Priority", "Recommendation"],
+                        fill_color="paleturquoise",
+                        align="left",
+                        font=dict(size=12, color="black"),
+                    ),
+                    cells=dict(
+                        values=[priorities, recommendations_list],
+                        fill_color="lavender",
+                        align="left",
+                        font=dict(size=11),
+                    ),
+                ),
+                row=6,
+                col=1,
+            )
 
     # Heatmaps (행 번호 동적)
     in_piv = df_in.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
@@ -584,7 +721,10 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
     )
 
     # Layout & Annotations
-    if has_aisle and has_forecast:
+    if has_aisle and has_forecast and has_pareto:
+        dashboard_height = 2000  # 7x2 layout with all features
+        edition_text = "Ultimate Edition v4.0.50 - Aisle Map, Forecast & Pareto Optimization"
+    elif has_aisle and has_forecast:
         dashboard_height = 1600  # 5x2 layout with forecast
         edition_text = "Ultimate Edition v4.0.49 - Aisle Map, Bottleneck & Predictive Forecasting"
     elif has_aisle:
