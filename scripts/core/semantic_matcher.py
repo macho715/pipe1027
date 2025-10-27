@@ -138,8 +138,10 @@ class MatchReport:
             print(f"  {'Semantic Key':<25s} {'→':<3s} {'Column Name':<30s} {'Conf':<6s}")
             print("  " + "-" * 64)
             for result in sorted(successful, key=lambda x: x.confidence, reverse=True):
-                print(f"  {result.semantic_key:<25s} {'→':<3s} "
-                      f"'{result.column_name}':<30s {result.confidence:5.1%}")
+                print(
+                    f"  {result.semantic_key:<25s} {'→':<3s} "
+                    f"{result.column_name:<30s} {result.confidence:5.1%}"
+                )
         
         # Show failed matches
         failed = [r for r in self.results if not r.matched]
