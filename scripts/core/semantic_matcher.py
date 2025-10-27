@@ -140,7 +140,7 @@ class MatchReport:
             for result in sorted(successful, key=lambda x: x.confidence, reverse=True):
                 print(
                     f"  {result.semantic_key:<25s} {'→':<3s} "
-                    f"'{result.column_name:<30s}' {result.confidence:5.1%}"
+                    f"{result.column_name:<30s} {result.confidence:5.1%}"
                 )
         
         # Show failed matches
