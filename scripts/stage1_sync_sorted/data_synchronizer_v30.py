@@ -64,8 +64,8 @@ from scripts.core import (
 )
 
 # ===== Configuration =====
-ORANGE = "FFC000"  # Changed date cell
-YELLOW = "FFFF00"  # New row
+ORANGE = "FFFFC000"  # Changed date cell (ARGB format)
+YELLOW = "FFFFFF00"  # New row (ARGB format)
 
 # Invalid header patterns to filter out
 INVALID_HEADER_PATTERNS = [
@@ -105,21 +105,21 @@ FILE_NAME_KEYWORDS = {
 # ✅ Corrected: These columns contain WAREHOUSE IN/OUT DATES
 # Column names say "location" but actual data is DATES (warehouse entry/exit timestamps)
 DATE_SEMANTIC_KEYS = [
-    "etd_atd",           # Estimated/Actual Time of Departure
-    "eta_ata",           # Estimated/Actual Time of Arrival
-    "dhl_wh",            # DHL Warehouse IN date
-    "dsv_indoor",        # DSV Indoor Warehouse IN date
-    "dsv_al_markaz",     # DSV Al Markaz Warehouse IN date
-    "dsv_outdoor",       # DSV Outdoor Warehouse IN date
-    "aaa_storage",       # AAA Storage IN date
-    "hauler_indoor",     # Hauler Indoor IN date
-    "dsv_mzp",           # DSV MZP IN date
-    "mosb",              # MOSB IN date
-    "shifting",          # Shifting date
-    "mir",               # MIR site IN date
-    "shu",               # SHU site IN date
-    "das",               # DAS site IN date
-    "agi",               # AGI site IN date
+    "etd_atd",  # Estimated/Actual Time of Departure
+    "eta_ata",  # Estimated/Actual Time of Arrival
+    "dhl_wh",  # DHL Warehouse IN date
+    "dsv_indoor",  # DSV Indoor Warehouse IN date
+    "dsv_al_markaz",  # DSV Al Markaz Warehouse IN date
+    "dsv_outdoor",  # DSV Outdoor Warehouse IN date
+    "aaa_storage",  # AAA Storage IN date
+    "hauler_indoor",  # Hauler Indoor IN date
+    "dsv_mzp",  # DSV MZP IN date
+    "mosb",  # MOSB IN date
+    "shifting",  # Shifting date
+    "mir",  # MIR site IN date
+    "shu",  # SHU site IN date
+    "das",  # DAS site IN date
+    "agi",  # AGI site IN date
 ]
 
 ALWAYS_OVERWRITE_NONDATE = True
@@ -147,6 +147,7 @@ class Change:
     new_value: Any
     change_type: str  # "date_update" | "field_update" | "new_record"
     semantic_key: str = ""  # ✅ Phase 1: Semantic key for flexible column mapping
+    case_no: str = ""  # ✅ Phase 4: Case No. for correct row lookup after reordering
 
 
 @dataclass
@@ -176,6 +177,7 @@ class ChangeTracker:
                 new_value=kw.get("new_value"),
                 change_type=str(kw.get("change_type", "field_update")),
                 semantic_key=str(kw.get("semantic_key", "")),  # ✅ Phase 2: Include semantic_key
+                case_no=str(kw.get("case_no", "")),  # ✅ Phase 4: Include case_no for row lookup
             )
         )
 
@@ -450,21 +452,24 @@ class DataSynchronizerV30:
         for sheet_name, df in hitachi_sheets.items():
             df["Source_Vendor"] = "HITACHI"
             df["Source_Sheet"] = sheet_name
-            print(f"[HITACHI] Set Source_Vendor='HITACHI', Source_Sheet='{sheet_name}' for {len(df)} rows")
+            print(
+                f"[HITACHI] Set Source_Vendor='HITACHI', Source_Sheet='{sheet_name}' for {len(df)} rows"
+            )
 
         master_sheets.update(hitachi_sheets)
 
         # Look for SIEMENS file in the same directory first
         master_dir = Path(master_xlsx).parent
-        siemens_files = list(master_dir.glob("*SIMENSE*.xls*")) + list(master_dir.glob("*SIM*.xls*"))
+        siemens_files = list(master_dir.glob("*SIMENSE*.xls*")) + list(
+            master_dir.glob("*SIM*.xls*")
+        )
 
         # If not found, search in parent directory's subdirectories
         if not siemens_files:
             parent_dir = master_dir.parent  # data/raw/
             print(f"[INFO] Searching for SIEMENS files in subdirectories of {parent_dir}")
-            siemens_files = (
-                list(parent_dir.glob("*/*SIMENSE*.xls*")) +
-                list(parent_dir.glob("*/*SIM*.xls*"))
+            siemens_files = list(parent_dir.glob("*/*SIMENSE*.xls*")) + list(
+                parent_dir.glob("*/*SIM*.xls*")
             )
 
         if siemens_files:
@@ -480,23 +485,30 @@ class DataSynchronizerV30:
             print("[INFO] Cleaning and mapping SIEMENS data...")
             for sheet_name, siemens_df in siemens_sheets.items():
                 # 1. Bill of Lading 컬럼 제거
-                bill_of_lading_patterns = ['billof', 'billoflading', 'b/l', 'bl', 'lading']
-                bl_columns = [col for col in siemens_df.columns
-                             if any(pattern in str(col).lower().replace(' ', '').replace('_', '')
-                                   for pattern in bill_of_lading_patterns)]
+                bill_of_lading_patterns = ["billof", "billoflading", "b/l", "bl", "lading"]
+                bl_columns = [
+                    col
+                    for col in siemens_df.columns
+                    if any(
+                        pattern in str(col).lower().replace(" ", "").replace("_", "")
+                        for pattern in bill_of_lading_patterns
+                    )
+                ]
                 if bl_columns:
-                    print(f"[SIEMENS] Dropping Bill of Lading columns from '{sheet_name}': {bl_columns}")
-                    siemens_df.drop(columns=bl_columns, inplace=True, errors='ignore')
+                    print(
+                        f"[SIEMENS] Dropping Bill of Lading columns from '{sheet_name}': {bl_columns}"
+                    )
+                    siemens_df.drop(columns=bl_columns, inplace=True, errors="ignore")
 
                 # 2. columns_to_drop 리스트 초기화
                 columns_to_drop = []
 
                 # 3. SIEMENS 컬럼을 HITACHI 컬럼명으로 매핑
                 column_mapping = {
-                    'PackageNo': 'Case No.',
-                    'PO.No': 'EQ No',
-                    'HSCode': 'HS Code',
-                    'No.': 'no.'  # 시퀀스 번호 통합
+                    "PackageNo": "Case No.",
+                    "PO.No": "EQ No",
+                    "HSCode": "HS Code",
+                    "No.": "no.",  # 시퀀스 번호 통합
                 }
 
                 print(f"[SIEMENS] Mapping columns to HITACHI structure for '{sheet_name}'...")
@@ -506,18 +518,26 @@ class DataSynchronizerV30:
                             # 기존 HITACHI 컬럼이 있으면 빈 값만 SIEMENS 데이터로 채우기
                             null_count = siemens_df[hitachi_col].isna().sum()
                             if null_count > 0:
-                                siemens_df[hitachi_col].fillna(siemens_df[siemens_col], inplace=True)
-                                print(f"  - Filled {null_count} null values in '{hitachi_col}' with '{siemens_col}' data")
+                                siemens_df[hitachi_col].fillna(
+                                    siemens_df[siemens_col], inplace=True
+                                )
+                                print(
+                                    f"  - Filled {null_count} null values in '{hitachi_col}' with '{siemens_col}' data"
+                                )
                         else:
                             # HITACHI 컬럼이 없으면 SIEMENS 컬럼을 rename
                             siemens_df.rename(columns={siemens_col: hitachi_col}, inplace=True)
                             print(f"  - Renamed '{siemens_col}' → '{hitachi_col}'")
 
                 # 4. SIEMENS 전용 컬럼 무조건 제거 (매핑 여부 관계없이)
-                siemens_specific_cols = ['No.', 'PackageNo', 'PO.No', 'HSCode', 'BillofLading']
+                siemens_specific_cols = ["No.", "PackageNo", "PO.No", "HSCode", "BillofLading"]
                 for siemens_col, hitachi_col in column_mapping.items():
                     # 매핑 후 원본 SIEMENS 컬럼이 남아있으면 제거
-                    if siemens_col in siemens_df.columns and hitachi_col in siemens_df.columns and siemens_col != hitachi_col:
+                    if (
+                        siemens_col in siemens_df.columns
+                        and hitachi_col in siemens_df.columns
+                        and siemens_col != hitachi_col
+                    ):
                         columns_to_drop.append(siemens_col)
 
                 # SIEMENS 전용 컬럼 무조건 제거
@@ -526,8 +546,10 @@ class DataSynchronizerV30:
                         columns_to_drop.append(col)
 
                 if columns_to_drop:
-                    print(f"[SIEMENS] Dropping SIEMENS-specific columns from '{sheet_name}': {columns_to_drop}")
-                    siemens_df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+                    print(
+                        f"[SIEMENS] Dropping SIEMENS-specific columns from '{sheet_name}': {columns_to_drop}"
+                    )
+                    siemens_df.drop(columns=columns_to_drop, inplace=True, errors="ignore")
 
                 # 업데이트된 DataFrame 저장
                 siemens_sheets[sheet_name] = siemens_df
@@ -550,17 +572,21 @@ class DataSynchronizerV30:
                     merged_df = pd.concat([hitachi_df, siemens_df], ignore_index=True, sort=False)
 
                     # CRITICAL: Remove duplicates based on Case No
-                    if 'Case No.' in merged_df.columns:
+                    if "Case No." in merged_df.columns:
                         before_dedup = len(merged_df)
-                        merged_df = merged_df.drop_duplicates(subset=['Case No.'], keep='first')
+                        merged_df = merged_df.drop_duplicates(subset=["Case No."], keep="first")
                         after_dedup = len(merged_df)
                         removed = before_dedup - after_dedup
                         if removed > 0:
-                            print(f"[DEDUP] Removed {removed} duplicate Case No entries from merged data")
+                            print(
+                                f"[DEDUP] Removed {removed} duplicate Case No entries from merged data"
+                            )
 
                     master_sheets[sheet_name] = merged_df
 
-                    print(f"[OK] Merged '{sheet_name}': HITACHI({len(hitachi_df)}) + SIEMENS({len(siemens_df)}) = {len(merged_df)} rows after dedup")
+                    print(
+                        f"[OK] Merged '{sheet_name}': HITACHI({len(hitachi_df)}) + SIEMENS({len(siemens_df)}) = {len(merged_df)} rows after dedup"
+                    )
                 else:
                     # New sheet from SIEMENS
                     print(f"[INFO] Adding new SIEMENS sheet '{sheet_name}'")
@@ -614,7 +640,9 @@ class DataSynchronizerV30:
             if header_row is None:
                 header_row = sheet_header_row
 
-            print(f"  [OK] Header at row {sheet_header_row} (confidence: {confidence:.0%}) [{vendor_type}]")
+            print(
+                f"  [OK] Header at row {sheet_header_row} (confidence: {confidence:.0%}) [{vendor_type}]"
+            )
 
             # Load sheet
             df = pd.read_excel(
@@ -907,6 +935,7 @@ class DataSynchronizerV30:
         # Get column order from core registry (Single Source of Truth)
         # All warehouse/site column definitions are centrally managed in @core/header_registry.py
         from core import get_warehouse_columns, get_site_columns
+
         WAREHOUSE_ORDER = get_warehouse_columns()
         SITE_ORDER = get_site_columns()
 
@@ -942,7 +971,8 @@ class DataSynchronizerV30:
         # 2. Extra base columns not in standard order (for dynamic columns)
         # Exclude 'no' (lowercase without dot) as it's likely a duplicate of 'no.'
         extra_base_cols = [
-            col for col in df.columns
+            col
+            for col in df.columns
             if col not in STAGE1_BASE_COLS_ORDER
             and col not in location_set
             and col != "Shifting"
@@ -1059,17 +1089,28 @@ class DataSynchronizerV30:
 
         idx: Dict[str, int] = {}
 
-        # Normalize case numbers: uppercase, remove special characters
-        series = df[case_col].fillna("").astype(str).str.strip().str.upper()
-        series = series.apply(lambda x: re.sub(r"[^A-Z0-9]", "", x))
-
-        for i, v in enumerate(series.tolist()):
-            if not v:
+        for i, val in enumerate(df[case_col]):
+            # Use the new helper for consistent normalization
+            v = self._normalize_case_no(val)
+            if not v:  # Skip empty values
                 continue
             if v not in idx:  # Keep first occurrence
                 idx[v] = i
 
         return idx
+
+    def _normalize_case_no(self, case_no: Any) -> str:
+        """
+        Case No.를 일관된 형식으로 정규화합니다.
+        (대문자, 공백 제거, 영숫자만 남김)
+        """
+        import re
+
+        if pd.isna(case_no) or case_no is None:
+            return ""
+        # 문자열로 변환, 공백 제거, 대문자 변환 후 영숫자가 아닌 문자 모두 제거
+        normalized = re.sub(r"[^A-Z0-9]", "", str(case_no).strip().upper())
+        return normalized
 
     def _apply_master_order_sorting(
         self,
@@ -1217,13 +1258,9 @@ class DataSynchronizerV30:
 
         # Process each master row
         for mi, mrow in master.iterrows():
-            # Get case number
-            key = (
-                str(mrow[master_case_col]).strip().upper()
-                if pd.notna(mrow[master_case_col])
-                else ""
-            )
-            if not key:
+            # Get case number using consistent normalization
+            key = self._normalize_case_no(mrow[master_case_col])
+            if not key:  # Skip if case number is empty after normalization
                 continue
 
             # Check if case exists in warehouse
@@ -1310,6 +1347,7 @@ class DataSynchronizerV30:
                                 row_index=wi,
                                 column_name=w_col,
                                 semantic_key=semantic_key,  # ✅ Phase 3
+                                case_no=key,  # ✅ Phase 4: Include case_no for correct row lookup
                                 old_value=wval,
                                 new_value=mval,
                                 change_type="date_update",
@@ -1328,6 +1366,7 @@ class DataSynchronizerV30:
                                 row_index=wi,
                                 column_name=w_col,
                                 semantic_key=semantic_key,  # ✅ Phase 3
+                                case_no=key,  # ✅ Phase 4: Include case_no
                                 old_value=wval,
                                 new_value=mval,
                                 change_type="field_update",
@@ -1353,6 +1392,7 @@ class DataSynchronizerV30:
                             row_index=wi,
                             column_name=m_col,
                             semantic_key=semantic_key,  # ✅ Phase 3
+                            case_no=key,  # ✅ Phase 4: Include case_no
                             old_value=old_val,
                             new_value=mval,
                             change_type="master_only_update",
@@ -1407,6 +1447,7 @@ class DataSynchronizerV30:
 
             # Check if Master and Warehouse are the same file
             from pathlib import Path
+
             master_path = Path(master_xlsx).resolve()
             warehouse_path = Path(warehouse_xlsx).resolve()
 
@@ -1427,7 +1468,9 @@ class DataSynchronizerV30:
                         df["Source_Vendor"] = None  # Will be filled from Master during sync
                     if "Source_Sheet" not in df.columns:
                         df["Source_Sheet"] = sheet_name  # Warehouse's own sheet name
-                    print(f"[WAREHOUSE] Initialized metadata for '{sheet_name}': Source_Vendor=None, Source_Sheet='{sheet_name}'")
+                    print(
+                        f"[WAREHOUSE] Initialized metadata for '{sheet_name}': Source_Vendor=None, Source_Sheet='{sheet_name}'"
+                    )
 
             # Phase 2: Process each sheet independently
             print("\n" + "=" * 60)
@@ -1539,7 +1582,9 @@ class DataSynchronizerV30:
                 print(f"\n--- Processing master-only sheet: '{sheet_name}' ---")
                 m_df = master_sheets[sheet_name]
                 # Use default header row for master sheets
-                m_header_row = 4  # Default for HITACHI, SIEMENS uses 0 but we'll use 4 for consistency
+                m_header_row = (
+                    4  # Default for HITACHI, SIEMENS uses 0 but we'll use 4 for consistency
+                )
 
                 # Remove Source_Sheet column
                 if "Source_Sheet" in m_df.columns:
@@ -1560,7 +1605,7 @@ class DataSynchronizerV30:
                 )
             )
 
-            # Save all sheets
+            # Save all sheets with color formatting
             print(f"  Writing to: {Path(out).name}")
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
                 for sheet_name, (df, header_row) in processed_sheets.items():
@@ -1569,22 +1614,22 @@ class DataSynchronizerV30:
                         :31
                     ]  # Excel limit
                     df.to_excel(writer, sheet_name=clean_sheet_name, index=False)
-                    print(f"    - {clean_sheet_name}: {len(df)} rows")
+                    print(f"    - Wrote sheet '{clean_sheet_name}' with {len(df)} rows")
 
-            print(f"  [OK] Saved {len(processed_sheets)} sheets")
+                print(f"\n  Applying color formatting before saving...")
+                # Get the openpyxl workbook object from the writer
+                wb = writer.book
 
-            # Apply color formatting to all sheets
-            print(f"  Applying color formatting...")
-            for sheet_name, (df, header_row) in processed_sheets.items():
-                clean_sheet_name = sheet_name.replace("/", "_").replace("\\", "_")[:31]
-                # ✅ Use the sheet-specific change tracker
-                if sheet_name in sheet_change_trackers:
-                    self.change_tracker = sheet_change_trackers[sheet_name]
-                    print(f"    - {clean_sheet_name}: {len(self.change_tracker.changes)} changes")
-                    self._apply_excel_formatting(out, clean_sheet_name, header_row)
-                else:
-                    print(f"    - {clean_sheet_name}: No change tracker (skipped)")
-            print(f"  [OK] Formatting applied to all sheets")
+                # Apply color formatting to all sheets
+                for sheet_name, (df, header_row) in processed_sheets.items():
+                    clean_sheet_name = sheet_name.replace("/", "_").replace("\\", "_")[:31]
+                    if sheet_name in sheet_change_trackers:
+                        self.change_tracker = sheet_change_trackers[sheet_name]
+                        ws = wb[clean_sheet_name]
+                        self._apply_excel_formatting(wb, ws, header_row)
+                    else:
+                        print(f"    - Skipping formatting for '{clean_sheet_name}' (no changes)")
+            print(f"  [OK] File saved with formatting: {Path(out).name}")
 
             # Create merged file (NEW: Single sheet with all data combined)
             print(f"\n[INFO] 합쳐진 단일시트 파일 생성 중...")
@@ -1693,31 +1738,25 @@ class DataSynchronizerV30:
 
         return None
 
-    def _apply_excel_formatting(self, excel_file: str, sheet_name: str, header_row: int):
+    def _apply_excel_formatting(self, wb, ws, header_row: int):
         """
-        Apply color formatting to the Excel file to highlight changes.
+        Apply color formatting to Excel worksheet to highlight changes.
 
         Args:
-            excel_file: Path to the Excel file
-            sheet_name: Name of the sheet to format
+            wb: openpyxl Workbook object
+            ws: openpyxl Worksheet object
             header_row: Row index where headers start (0-based from pandas)
         """
         try:
+            sheet_name = ws.title
             # Early return if no changes to apply
             if not self.change_tracker.changes:
-                print(f"      [DEBUG] No changes to apply for {sheet_name}")
+                print(f"      [DEBUG] No changes to apply for '{sheet_name}'")
                 return
 
-            print(f"      [DEBUG] Applying {len(self.change_tracker.changes)} changes to {sheet_name}")
-            print(f"      [DEBUG] Target file: {excel_file}")
-
-            # ✅ Load without data_only to preserve formatting
-            wb = load_workbook(excel_file, data_only=False)
-            if sheet_name not in wb.sheetnames:
-                print(f"      [DEBUG] Sheet {sheet_name} not found in {wb.sheetnames}")
-                return
-
-            ws = wb[sheet_name]
+            print(
+                f"      [DEBUG] Applying {len(self.change_tracker.changes)} changes to sheet '{sheet_name}'"
+            )
 
             # Excel rows are 1-indexed, and we need to account for header
             excel_header_row = header_row + 1
@@ -1725,33 +1764,59 @@ class DataSynchronizerV30:
 
             # Build header map
             header_map = {}
+            case_no_col_idx = None
             for c_idx, cell in enumerate(ws[excel_header_row], start=1):
                 if cell.value is None:
                     continue
-                header_map[str(cell.value).strip()] = c_idx
+                header_name = str(cell.value).strip()
+                header_map[header_name] = c_idx
+                
+                # Find Case No. column
+                if "Case" in header_name and "No" in header_name:
+                    case_no_col_idx = c_idx
 
-            print(f"      [DEBUG] Header map size: {len(header_map)}, first 5: {list(header_map.keys())[:5]}")
+            print(
+                f"      [DEBUG] Header map size: {len(header_map)}, first 5: {list(header_map.keys())[:5]}"
+            )
+            print(f"      [DEBUG] Case No. column index: {case_no_col_idx}")
+            
+            # ✅ Phase 4: Build Case No. → Excel row mapping
+            case_to_row = {}
+            if case_no_col_idx:
+                for row_idx in range(excel_header_row + 1, ws.max_row + 1):
+                    case_no_cell = ws.cell(row=row_idx, column=case_no_col_idx)
+                    if case_no_cell.value:
+                        case_to_row[str(case_no_cell.value).strip()] = row_idx
+                print(f"      [DEBUG] Built case_to_row mapping: {len(case_to_row)} cases")
 
             # Define fills
             orange_fill = PatternFill(start_color=ORANGE, end_color=ORANGE, fill_type="solid")
             yellow_fill = PatternFill(start_color=YELLOW, end_color=YELLOW, fill_type="solid")
 
             # ✅ Phase 4: Apply date changes (orange) with 3-level Fallback
+            # Apply date changes (orange) with 3-level Fallback
             orange_applied = 0
             match_by_semantic = 0
             match_by_exact = 0
             match_by_fuzzy = 0
+            orange_cells: List[Tuple[int, int]] = []
 
             for change in self.change_tracker.changes:
                 if change.change_type != "date_update":
                     continue
 
-                excel_row = change.row_index + excel_header_row + 1
+                # ✅ Phase 4: Use Case No. to find correct row after reordering
+                if change.case_no and change.case_no in case_to_row:
+                    excel_row = case_to_row[change.case_no]
+                else:
+                    # Fallback to old method if case_no not available
+                    excel_row = change.row_index + excel_header_row + 1
+                    if change.case_no:
+                        print(f"      [WARN] Case No. '{change.case_no}' not found in case_to_row mapping, using fallback row {excel_row}")
 
                 # Level 1: Use semantic key mapping (most accurate)
                 actual_col_name = self.change_tracker.get_column_name(
-                    change.semantic_key,
-                    fallback=change.column_name
+                    change.semantic_key, fallback=change.column_name
                 )
 
                 # Level 2: Exact match in header_map
@@ -1770,6 +1835,7 @@ class DataSynchronizerV30:
                     if cell.value is not None and str(cell.value).strip():
                         cell.fill = orange_fill
                         orange_applied += 1
+                        orange_cells.append((excel_row, col_idx))
 
             print(f"      [DEBUG] Orange cells applied: {orange_applied}")
             print(f"        - Semantic key matches: {match_by_semantic}")
@@ -1778,6 +1844,7 @@ class DataSynchronizerV30:
 
             # Apply new records (yellow)
             yellow_applied = 0
+            yellow_cells: List[Tuple[int, int]] = []
             for change in self.change_tracker.changes:
                 if change.change_type == "new_record":
                     excel_row = change.row_index + excel_header_row + 1
@@ -1787,46 +1854,60 @@ class DataSynchronizerV30:
                         if cell.value is not None and str(cell.value).strip():
                             cell.fill = yellow_fill
                             yellow_applied += 1
+                            yellow_cells.append((excel_row, cell.col_idx))
 
             print(f"      [DEBUG] Yellow cells applied: {yellow_applied}")
 
-            # ✅ Save with explicit close to ensure colors persist
-            wb.save(excel_file)
-            wb.close()
-            print(f"      [DEBUG] File saved and closed")
+            # In-memory verification
+            def _matches_color(fill: PatternFill, targets: Tuple[str, ...]) -> bool:
+                if not fill:
+                    return False
+                color = getattr(fill, "start_color", None)
+                candidates: List[str] = []
+                if color is not None:
+                    rgb = str(getattr(color, "rgb", "") or "").upper()
+                    if rgb:
+                        candidates.append(rgb)
+                    indexed = getattr(color, "indexed", None)
+                    if isinstance(indexed, str):
+                        candidates.append(indexed.upper())
+                fg_color = getattr(fill, "fgColor", None)
+                if fg_color is not None:
+                    fg_rgb = str(getattr(fg_color, "rgb", "") or "").upper()
+                    if fg_rgb:
+                        candidates.append(fg_rgb)
+                return any(
+                    any(target in candidate for target in targets) for candidate in candidates
+                )
 
-            # ✅ 즉시 검증: 저장된 파일을 다시 읽어 색상 확인
-            try:
-                wb_verify = load_workbook(excel_file)
-                ws_verify = wb_verify[sheet_name]
-                verify_orange = 0
-                verify_yellow = 0
+            # In-memory color verification
+            verify_orange = 0
+            for row_idx, col_idx in orange_cells:
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if _matches_color(cell.fill, ("FFFFC000", "FFC000", "00FFC000")):
+                    verify_orange += 1
 
-                for r in range(2, min(100, ws_verify.max_row + 1)):
-                    for c in range(1, ws_verify.max_column + 1):
-                        cell = ws_verify.cell(r, c)
-                        if cell.fill and cell.fill.start_color:
-                            rgb = str(cell.fill.start_color.rgb or '').upper()
-                            if 'FFC000' in rgb:
-                                verify_orange += 1
-                            elif 'FFFF00' in rgb:
-                                verify_yellow += 1
+            verify_yellow = 0
+            for row_idx, col_idx in yellow_cells:
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if _matches_color(cell.fill, ("FFFFFF00", "FFFF00", "00FFFF00")):
+                    verify_yellow += 1
 
-                print(f"      [VERIFY] 저장 후 파일 재확인 (처음 100행):")
-                print(f"        - Orange: {verify_orange}")
-                print(f"        - Yellow: {verify_yellow}")
+            print(f"      [VERIFY] In-memory color check for '{sheet_name}':")
+            print(f"        - Orange: {verify_orange}/{orange_applied}")
+            print(f"        - Yellow: {verify_yellow}/{yellow_applied}")
 
-                if verify_orange == 0 and orange_applied > 0:
-                    print(f"        WARNING: Orange color lost!")
-                if verify_yellow == 0 and yellow_applied > 0:
-                    print(f"        WARNING: Yellow color lost!")
-
-            except Exception as verify_error:
-                print(f"      [VERIFY] 검증 실패: {verify_error}")
+            if verify_orange < orange_applied:
+                missing = orange_applied - verify_orange
+                print(f"        WARNING: Orange color mismatch on {missing} cells!")
+            if verify_yellow < yellow_applied:
+                missing = yellow_applied - verify_yellow
+                print(f"        WARNING: Yellow color mismatch on {missing} cells!")
 
         except Exception as e:
             print(f"  Warning: Formatting failed: {e}")
             import traceback
+
             traceback.print_exc()
 
 
