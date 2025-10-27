@@ -5,6 +5,53 @@ All notable changes to the HVDC Pipeline project will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.45] - 2025-10-27
+
+### 🐛 Fixed - GitHub PR #1 & #2 버그 수정
+
+#### Unicode Header Normalization 개선 (PR #1)
+- **Problem**: 헤더 정규화 시 Unicode 문자(한국어, 일본어 등)가 손실됨
+- **Solution**: 
+  - Unicode 문자 보존 로직 추가
+  - 비-라틴 문자열 유지 및 빈 문자열 방지
+  - 헤더 정규화 시 UTF-8 문자 보존
+- **Files Modified**:
+  - `scripts/core/header_normalizer.py`: Unicode 문자 보존 로직 개선 (+73 lines, -68 lines)
+- **Tests**: 회귀 테스트 추가 (pytest 3개)
+  - `test_normalize_retains_korean_characters()`: 한글 헤더 보존
+  - `test_normalize_retains_japanese_characters()`: 일본어 헤더 보존
+  - `test_alternatives_include_non_latin_variants()`: 비-라틴 대안 문자열 검증
+- **Impact**: 
+  - 한글/일본어 헤더 정규화 정확도 향상
+  - 다국어 지원 강화
+
+#### Semantic Matcher Summary 포맷 버그 수정 (PR #2)
+- **Problem**: MatchReport.print_summary()에서 컬럼명 포맷 지정자가 리터럴로 출력됨
+  - `f"'{result.column_name}':<30s"` 형식이 잘못되어 포맷 문자열이 그대로 출력
+- **Solution**: 포맷 지정자를 문자열 안으로 이동
+  - Before: `f"'{result.column_name}':<30s {result.confidence:5.1%}"`
+  - After: `f"'{result.column_name:<30s}' {result.confidence:5.1%}"`
+- **Files Modified**:
+  - `scripts/core/semantic_matcher.py`: 포맷 문자열 수정 (2 lines)
+- **Tests**: 단위 테스트 추가
+  - `tests/core/test_semantic_matcher.py`: 요약 출력 포맷 검증
+- **Impact**: 
+  - Semantic matcher 출력 가독성 향상
+  - 정렬된 컬럼명 표시 개선
+
+### 🧪 Test Coverage
+- **pytest 설정**: `pytest.ini` 추가 (testpaths = tests)
+- **신규 테스트 파일**:
+  - `tests/test_header_normalizer.py` (45줄) - Unicode 보존 테스트
+  - `tests/core/test_semantic_matcher.py` (45줄) - 포맷 검증 테스트
+- **Test Results**: 4개 테스트 모두 통과 (0.14초)
+
+### 📚 Documentation
+- 이 버전은 GitHub PR #1과 PR #2가 머지되어 적용된 변경사항을 포함합니다
+- 커밋: `66fba63` (PR #1), `66a95e3` (PR #2)
+
+---
+
 ## [4.0.44] - 2025-10-27
 
 ### 🧹 Maintenance - 루트 폴더 정리 (3단계 접근)

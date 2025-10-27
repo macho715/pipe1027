@@ -1,10 +1,29 @@
-# HVDC Pipeline v4.0.44
+# HVDC Pipeline v4.0.45
 
 **Samsung C&T Logistics | ADNOC·DSV Partnership**
 
 통합된 HVDC 파이프라인으로 데이터 동기화부터 이상치 탐지까지 전체 프로세스를 자동화합니다.
 
 ## 🚀 최근 업데이트
+
+### v4.0.45 - 버그 수정 및 테스트 강화 (2025-10-27)
+
+#### GitHub PR #1 & #2 머지 완료
+- **Unicode 헤더 정규화 개선**: 한글/일본어 등 Unicode 문자 보존 로직 추가
+- **Semantic matcher 출력 포맷 수정**: 컬럼명 정렬 버그 해결
+- **테스트 커버리지 강화**: pytest 3개 추가, 모든 테스트 통과 (0.14초)
+- **Files Modified**: 
+  - `scripts/core/header_normalizer.py` (Unicode 보존)
+  - `scripts/core/semantic_matcher.py` (포맷 버그 수정)
+- **New Test Files**: 
+  - `tests/test_header_normalizer.py` (45줄)
+  - `tests/core/test_semantic_matcher.py` (45줄)
+
+#### 상세 변경사항
+- Unicode 문자 헤더 정규화 시 보존 기능 추가
+- MatchReport.print_summary() 포맷 버그 수정
+- pytest 설정 파일 추가 (pytest.ini)
+- 다국어 지원 강화
 
 ### v4.0.44 - 루트 폴더 정리 (2025-10-27)
 
