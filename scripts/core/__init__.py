@@ -18,6 +18,7 @@ from .header_detector import HeaderDetector, detect_header_row
 from .header_normalizer import HeaderNormalizer, normalize_header
 from .semantic_matcher import SemanticMatcher, find_header_by_meaning
 from .header_registry import HeaderRegistry, HVDC_HEADER_REGISTRY, HeaderCategory, HeaderDefinition
+from .name_resolver import FlexibleNameResolver, MatchResult
 from .data_parser import parse_stack_status, calculate_sqm, convert_mm_to_cm, map_stack_status
 from .standard_header_order import (
     STANDARD_HEADER_ORDER,
@@ -52,6 +53,8 @@ __all__ = [
     "HVDC_HEADER_REGISTRY",
     "HeaderCategory",
     "HeaderDefinition",
+    "FlexibleNameResolver",
+    "MatchResult",
     "parse_stack_status",
     "calculate_sqm",
     "convert_mm_to_cm",
