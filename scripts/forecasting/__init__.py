@@ -13,7 +13,7 @@ try:
         forecast_cost_by_period,
         calculate_forecast_confidence
     )
-    
+
     __all__ = [
         "ForecastService",
         "ForecastResult",
@@ -29,7 +29,7 @@ except ImportError:
         forecast_cost_by_period,
         calculate_forecast_confidence
     )
-    
+
     __all__ = [
         "ForecastService",
         "ForecastResult",

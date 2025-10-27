@@ -32,7 +32,10 @@ try:
     from pareto_analyzer import calculate_pareto_analysis, calculate_aisle_occupancy
 except ImportError:
     try:
-        from scripts.analysis.pareto_analyzer import calculate_pareto_analysis, calculate_aisle_occupancy
+        from scripts.analysis.pareto_analyzer import (
+            calculate_pareto_analysis,
+            calculate_aisle_occupancy,
+        )
     except ImportError:
         print("[WARN] Pareto analyzer not available, Pareto features disabled")
         calculate_pareto_analysis = None
@@ -291,15 +294,21 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
     pareto_result = None
     has_pareto = calculate_pareto_analysis is not None and calculate_aisle_occupancy is not None
 
-    if has_pareto and "aisle_code" in metrics["df_wh"].columns and "area_sqm" in metrics["df_wh"].columns:
+    if (
+        has_pareto
+        and "aisle_code" in metrics["df_wh"].columns
+        and "area_sqm" in metrics["df_wh"].columns
+    ):
         try:
             print("[INFO] Calculating Pareto analysis...")
             # Aisle 점유율 계산
             aisle_occupancy = calculate_aisle_occupancy(metrics["df_wh"])
-            
+
             # Pareto 분석 실행
             pareto_result = calculate_pareto_analysis(aisle_occupancy, threshold=80.0)
-            print(f"[OK] Pareto analysis complete: {len(pareto_result['pareto_aisles'])} priority aisles")
+            print(
+                f"[OK] Pareto analysis complete: {len(pareto_result['pareto_aisles'])} priority aisles"
+            )
         except Exception as e:
             print(f"[WARN] Pareto analysis failed: {e}")
             has_pareto = False
@@ -393,6 +402,34 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 [{"type": "bar"}, {"type": "bar"}],
                 [{"type": "scatter"}, {"type": "scatter"}],
                 [{"type": "heatmap"}, {"type": "heatmap"}],
+            ],
+            vertical_spacing=0.06,
+            horizontal_spacing=0.12,
+            row_heights=[0.2, 0.2, 0.2, 0.2, 0.2],
+        )
+    elif has_aisle and has_pareto:
+        # 5x2 레이아웃 (Aisle + Pareto, no Forecast)
+        fig = make_subplots(
+            rows=5,
+            cols=2,
+            subplot_titles=(
+                "Current Inventory (Cases)",
+                "Monthly Flow (In/Out)",
+                "SQM Utilization Gauge",
+                "SQM by Storage",
+                "Aisle Utilization (A1-A8)",
+                "Bottleneck by Aisle (>90 days)",
+                "Pareto Analysis - Aisle Occupancy",
+                "Cumulative % (80/20 Rule)",
+                "Optimization Recommendations",
+                "",
+            ),
+            specs=[
+                [{"type": "bar"}, {"type": "scatter"}],
+                [{"type": "indicator"}, {"type": "pie"}],
+                [{"type": "bar"}, {"type": "bar"}],
+                [{"type": "bar"}, {"type": "scatter"}],
+                [{"type": "table", "colspan": 2}, None],
             ],
             vertical_spacing=0.06,
             horizontal_spacing=0.12,
@@ -616,18 +653,28 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 col=2,
             )
 
-            # For 7x2 layout (with Pareto), heatmaps on row 7
+            # For 7x2 layout (with Pareto and Forecast), heatmaps on row 7
             heatmap_row = 7 if (has_pareto and pareto_result is not None) else 6
         else:
-            heatmap_row = 5 if has_pareto else 4
+            # For 5x2 layout (with Pareto only), no heatmaps
+            heatmap_row = 0 if (has_pareto and pareto_result is not None) else 5
     else:
-        heatmap_row = 5 if has_pareto else 3
+        # For 5x2 layout (Aisle + Pareto), no heatmaps
+        heatmap_row = 0 if (has_pareto and pareto_result is not None) else 5
 
     # 9 & 10. Pareto 차트 (Pareto 분석이 있을 경우)
-    if has_pareto and pareto_result is not None and (has_aisle and has_forecast):
+    if has_pareto and pareto_result is not None and has_aisle:
         pareto_df = pareto_result["cumulative_data"]
-        
-        # 9. Pareto 막대 차트 (Aisle별 점유 SQM) - Row 5 (6x2 레이아웃)
+
+        # Determine row number based on layout
+        if has_forecast:
+            pareto_bar_row, pareto_line_row = 5, 5
+            table_row = 6
+        else:
+            pareto_bar_row, pareto_line_row = 4, 4
+            table_row = 5
+
+        # 9. Pareto 막대 차트 (Aisle별 점유 SQM)
         fig.add_trace(
             go.Bar(
                 x=pareto_df["aisle"],
@@ -637,11 +684,11 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 text=pareto_df["occupied_sqm"].round(1),
                 textposition="outside",
             ),
-            row=5,
+            row=pareto_bar_row,
             col=1,
         )
-        
-        # 10. 누적 % 선 차트 - Row 5 (6x2 레이아웃)
+
+        # 10. 누적 % 선 차트
         fig.add_trace(
             go.Scatter(
                 x=pareto_df["aisle"],
@@ -651,25 +698,28 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 line=dict(color="red", width=2),
                 marker=dict(size=8, color="red"),
             ),
-            row=5,
+            row=pareto_line_row,
             col=2,
         )
-        
-        # 80% 기준선
-        fig.add_hline(
-            y=80,
-            line_dash="dash",
-            line_color="green",
-            annotation_text="80% Threshold",
-            annotation_position="right",
-            row=5,
+
+        # 80% 기준선 (Shape 사용)
+        fig.add_shape(
+            type="line",
+            xref=f"x{2 * (pareto_line_row - 1) + 2}",
+            yref=f"y{2 * (pareto_line_row - 1) + 2}",
+            x0=0,
+            x1=1,
+            y0=80,
+            y1=80,
+            line=dict(color="green", width=2, dash="dash"),
+            row=pareto_line_row,
             col=2,
         )
-        
-        # 11. 권장사항 테이블 - Row 6 (6x2 레이아웃)
+
+        # 11. 권장사항 테이블
         if pareto_result["recommendations"]:
             recommendations_list = pareto_result["recommendations"]
-            
+
             # 우선순위 추출 (첫 글자만)
             priorities = []
             for rec in recommendations_list:
@@ -681,7 +731,7 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                     priorities.append("Low")
                 else:
                     priorities.append("Info")
-            
+
             fig.add_trace(
                 go.Table(
                     header=dict(
@@ -697,28 +747,29 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                         font=dict(size=11),
                     ),
                 ),
-                row=6,
+                row=table_row,
                 col=1,
             )
 
-    # Heatmaps (행 번호 동적)
-    in_piv = df_in.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
-    fig.add_trace(
-        go.Heatmap(
-            z=in_piv.values, x=in_piv.columns, y=in_piv.index, colorscale="Greens", name="Inbound"
-        ),
-        row=heatmap_row,
-        col=1,
-    )
+    # Heatmaps (행 번호 동적, 0이면 추가하지 않음)
+    if heatmap_row > 0:
+        in_piv = df_in.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
+        fig.add_trace(
+            go.Heatmap(
+                z=in_piv.values, x=in_piv.columns, y=in_piv.index, colorscale="Greens", name="Inbound"
+            ),
+            row=heatmap_row,
+            col=1,
+        )
 
-    out_piv = df_out.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
-    fig.add_trace(
-        go.Heatmap(
-            z=out_piv.values, x=out_piv.columns, y=out_piv.index, colorscale="Reds", name="Outbound"
-        ),
-        row=heatmap_row,
-        col=2,
-    )
+        out_piv = df_out.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
+        fig.add_trace(
+            go.Heatmap(
+                z=out_piv.values, x=out_piv.columns, y=out_piv.index, colorscale="Reds", name="Outbound"
+            ),
+            row=heatmap_row,
+            col=2,
+        )
 
     # Layout & Annotations
     if has_aisle and has_forecast and has_pareto:
@@ -727,6 +778,9 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
     elif has_aisle and has_forecast:
         dashboard_height = 1600  # 5x2 layout with forecast
         edition_text = "Ultimate Edition v4.0.49 - Aisle Map, Bottleneck & Predictive Forecasting"
+    elif has_aisle and has_pareto:
+        dashboard_height = 1700  # 5x2 layout with Pareto (no forecast)
+        edition_text = "Ultimate Edition v4.0.50 - Aisle Map & Pareto Optimization"
     elif has_aisle:
         dashboard_height = 1400  # 4x2 layout with aisle
         edition_text = "Ultimate Edition v4.0.48 with Aisle Map & Bottleneck Analysis"
