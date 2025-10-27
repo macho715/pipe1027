@@ -54,25 +54,25 @@ def load_data(input_path, sheet_name="Case List, RIL", aisle_map_path=None):
     if aisle_map_path and Path(aisle_map_path).exists():
         print(f"[INFO] Loading Aisle Map from: {aisle_map_path}")
         aisle_df = pd.read_csv(aisle_map_path)
-        
+
         # Case No. 컬럼 찾기
         case_col = None
         for col in df.columns:
             if "case" in col.lower() and "no" in col.lower():
                 case_col = col
                 break
-        
+
         if case_col:
             # case_key를 문자열로 변환
             aisle_df["case_key"] = aisle_df["case_key"].astype(str)
             df[case_col] = df[case_col].astype(str)
-            
+
             # 병합 (left join)
             df = df.merge(
                 aisle_df[["case_key", "aisle_code", "slot_code", "side", "area_sqm"]],
                 left_on=case_col,
                 right_on="case_key",
-                how="left"
+                how="left",
             )
             print(f"[OK] Aisle Map merged: {df['aisle_code'].notna().sum()} cases matched")
         else:
@@ -256,7 +256,7 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
             .reset_index()
         )
         aisle_data = aisle_data.sort_values("aisle_code")
-        
+
         # 병목 구간 분석: 90일 이상 체류 케이스
         bottleneck_df = metrics["df_wh"][metrics["df_wh"]["Dwell_Days"] >= 90].copy()
         if len(bottleneck_df) > 0:
@@ -269,7 +269,7 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
 
     # Dashboard Layout - 확장 (4x2)
     has_aisle = aisle_data is not None and len(aisle_data) > 0
-    
+
     if has_aisle:
         fig = make_subplots(
             rows=4,
@@ -403,7 +403,7 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
             row=3,
             col=1,
         )
-        
+
         # 6. Bottleneck by Aisle
         if bottleneck_data is not None and len(bottleneck_data) > 0:
             # 색상: Dwell_Days에 따라 등급 부여
@@ -415,7 +415,7 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                     colors.append("#ff7f0e")  # 주황 (6개월-1년)
                 else:
                     colors.append("#ffbb78")  # 연주황 (90일-6개월)
-            
+
             fig.add_trace(
                 go.Bar(
                     x=bottleneck_data["aisle_code"],
@@ -428,7 +428,7 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 row=3,
                 col=2,
             )
-        
+
         heatmap_row = 4
     else:
         heatmap_row = 3
@@ -454,8 +454,12 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
 
     # Layout & Annotations
     dashboard_height = 1400 if has_aisle else 1100
-    edition_text = "Ultimate Edition v4.0.48 with Aisle Map & Bottleneck Analysis" if has_aisle else "Ultimate Edition with Stacking, Dwell & Turnover"
-    
+    edition_text = (
+        "Ultimate Edition v4.0.48 with Aisle Map & Bottleneck Analysis"
+        if has_aisle
+        else "Ultimate Edition with Stacking, Dwell & Turnover"
+    )
+
     fig.update_layout(
         height=dashboard_height,
         title_text=f"<b>DSV Al Markaz – Ultimate Flow & SQM Dashboard</b><br>"
@@ -492,7 +496,9 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="DSV Al Markaz Ultimate Dashboard Generator v4.0.48")
+    parser = argparse.ArgumentParser(
+        description="DSV Al Markaz Ultimate Dashboard Generator v4.0.48"
+    )
     parser.add_argument(
         "--input",
         "-i",
@@ -530,7 +536,9 @@ def main():
     aisle_map_path = Path(args.aisle_map) if args.aisle_map else None
 
     # Load & Analyze
-    df = load_data(str(input_path), args.sheet, aisle_map_path=str(aisle_map_path) if aisle_map_path else None)
+    df = load_data(
+        str(input_path), args.sheet, aisle_map_path=str(aisle_map_path) if aisle_map_path else None
+    )
     print("[INFO] Analyzing flows...")
     inbound_flow, outbound_flow = analyze_flows(df)
     print("[INFO] Calculating metrics...")
