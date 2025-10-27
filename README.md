@@ -1,10 +1,28 @@
-# HVDC Pipeline v4.0.46
+# HVDC Pipeline v4.0.47
 
 **Samsung C&T Logistics | ADNOC·DSV Partnership**
 
 통합된 HVDC 파이프라인으로 데이터 동기화부터 이상치 탐지까지 전체 프로세스를 자동화합니다.
 
 ## 🚀 최근 업데이트
+
+### v4.0.47 - Stage 1 색상 적용 버그 수정 (2025-10-27)
+
+#### 🐛 색상 적용 row_index 불일치 해결
+
+**문제점**
+- Case No. 208455 등 일부 케이스에서 잘못된 행에 색상(Orange) 적용
+- 원인: 행 재정렬 후 `row_index` 무효화
+
+**해결 방법**
+- `Change` 클래스에 `case_no` 필드 추가하여 Case No.로 최종 행 검색
+- 행 재정렬 후에도 올바른 셀에 색상 적용 보장
+
+**검증 결과**
+- Case No. 208455: Orange 색상 없음 ✅ (이전: 잘못 적용됨 ❌)
+- Stage 1 실행: 818 Orange, 13,091 Yellow 정상 적용 ✅
+
+---
 
 ### v4.0.46 - Name Resolver 도입 및 테스트 강화 (2025-10-27)
 
@@ -14,7 +32,7 @@
 - **Unicode-aware 이름 매칭 시스템**: 헤더명, 파일명, 시트명 유연한 매칭
 - **다국어 지원**: 한글/일본어 등 비-라틴 문자 지원
 - **별칭 및 퍼지 매칭**: 파일명 별칭 해석 및 시트명 퍼지 매칭
-- **Files Modified**: 
+- **Files Modified**:
   - `scripts/core/name_resolver.py` (새 파일, +127줄)
   - `tests/test_name_resolver.py` (새 파일, +73줄)
   - `scripts/core/__init__.py` (re-export)
@@ -38,10 +56,10 @@
 - **Unicode 헤더 정규화 개선**: 한글/일본어 등 Unicode 문자 보존 로직 추가
 - **Semantic matcher 출력 포맷 수정**: 컬럼명 정렬 버그 해결
 - **테스트 커버리지 강화**: pytest 3개 추가, 모든 테스트 통과 (0.14초)
-- **Files Modified**: 
+- **Files Modified**:
   - `scripts/core/header_normalizer.py` (Unicode 보존)
   - `scripts/core/semantic_matcher.py` (포맷 버그 수정)
-- **New Test Files**: 
+- **New Test Files**:
   - `tests/test_header_normalizer.py` (45줄)
   - `tests/core/test_semantic_matcher.py` (45줄)
 
@@ -179,10 +197,10 @@ variants = FileRegistry.get_sheet_variants('case_list')
   1. **`scripts/stage3_report/report_generator.py`** (5개 위치)
      - 창고/현장 컬럼, 위치 우선순위, 창고 우선순위, 기본 SQM
      - 하드코딩 → `get_warehouse_columns()`, `get_site_columns()` 사용
-  
+
   2. **`scripts/stage3_report/hvdc_excel_reporter_final_sqm_rev.py`** (2개 위치)
      - 창고/현장 컬럼을 Core에서 동적으로 가져오기
-  
+
   3. **`scripts/stage4_anomaly/anomaly_detector_balanced.py`** (2개 위치)
      - 대문자+언더스코어 형식으로 자동 변환하여 Core 사용
 

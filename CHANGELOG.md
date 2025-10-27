@@ -5,6 +5,36 @@ All notable changes to the HVDC Pipeline project will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.47] - 2025-10-27
+
+### 🐛 Fixed - Stage 1 색상 적용 row_index 불일치 해결
+
+#### 문제
+- Case No. 208455 등 일부 케이스에서 **잘못된 행에 색상**이 적용되는 버그
+- 원인: `_apply_updates` 실행 후 `_maintain_warehouse_order`로 행 재정렬 시, `ChangeTracker`의 `row_index`가 무효화됨
+- 증상: Master에 없는 케이스가 "날짜 변경됨"(Orange) 색상으로 표시
+
+#### 해결 방법
+- `Change` 클래스에 `case_no` 필드 추가
+- `_apply_updates`에서 모든 변경 기록 시 `case_no` 포함
+- `_apply_excel_formatting`에서 `case_to_row` 매핑 구축
+- Case No.로 최종 행을 검색하여 색상 적용
+
+#### 변경 파일
+- `scripts/stage1_sync_sorted/data_synchronizer_v30.py`:
+  - `Change` dataclass: `case_no` 필드 추가 (Line 150)
+  - `ChangeTracker.add_change`: `case_no` 매개변수 추가 (Line 180)
+  - `_apply_updates`: 모든 `add_change` 호출에 `case_no=key` 추가 (Lines 1350, 1369, 1395)
+  - `_apply_excel_formatting`: Case No. → Excel row 매핑 구축 (Lines 1783-1790)
+  - `_apply_excel_formatting`: Case No.로 행 검색 로직 추가 (Lines 1808-1815)
+
+#### 검증
+- Case No. 208455: Orange 색상 **없음** ✅ (이전: 잘못 적용됨 ❌)
+- Stage 1 실행: 818 Orange, 13,091 Yellow 정상 적용 ✅
+- 전체 파이프라인: 정상 동작 ✅
+
+---
+
 ## [4.0.46] - 2025-10-27
 
 ### ✨ Added - FlexibleNameResolver 도입 (GitHub PR #4)
@@ -19,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Implementation**:
   - `scripts/core/name_resolver.py` 추가 (+127 lines)
   - Core 패키지에서 re-export 설정
-- **Tests**: 
+- **Tests**:
   - `tests/test_name_resolver.py` 추가 (+73 lines)
   - 다국어 헤더/파일/시트명 회귀 테스트
   - pytest 실행: 모든 테스트 통과 ✅
@@ -28,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `tests/test_name_resolver.py` (new, +73 lines)
   - `scripts/core/__init__.py` (re-export resolver)
   - Total: 3 files, +203 lines
-- **Impact**: 
+- **Impact**:
   - 다국어 파일/시트명 처리 능력 향상
   - 유연한 이름 매칭으로 파이프라인 안정성 개선
 
@@ -54,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Unicode Header Normalization 개선 (PR #1)
 - **Problem**: 헤더 정규화 시 Unicode 문자(한국어, 일본어 등)가 손실됨
-- **Solution**: 
+- **Solution**:
   - Unicode 문자 보존 로직 추가
   - 비-라틴 문자열 유지 및 빈 문자열 방지
   - 헤더 정규화 시 UTF-8 문자 보존
@@ -64,7 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `test_normalize_retains_korean_characters()`: 한글 헤더 보존
   - `test_normalize_retains_japanese_characters()`: 일본어 헤더 보존
   - `test_alternatives_include_non_latin_variants()`: 비-라틴 대안 문자열 검증
-- **Impact**: 
+- **Impact**:
   - 한글/일본어 헤더 정규화 정확도 향상
   - 다국어 지원 강화
 
@@ -78,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `scripts/core/semantic_matcher.py`: 포맷 문자열 수정 (2 lines)
 - **Tests**: 단위 테스트 추가
   - `tests/core/test_semantic_matcher.py`: 요약 출력 포맷 검증
-- **Impact**: 
+- **Impact**:
   - Semantic matcher 출력 가독성 향상
   - 정렬된 컬럼명 표시 개선
 
@@ -342,7 +372,7 @@ VENDORS = {
 def get_source_file_name(cls, vendor_key: str) -> str:
     """
     Get Source_File identifier for vendor.
-    
+
     Returns:
         Source file identifier (e.g., 'HITACHI(HE)', 'SIEMENS(SIM)')
     """
@@ -350,13 +380,13 @@ def get_source_file_name(cls, vendor_key: str) -> str:
     vendor_info = cls.VENDORS.get(vendor_key.lower())
     if vendor_info and 'source_file' in vendor_info:
         return vendor_info['source_file']
-    
+
     # Try normalizing vendor name and lookup again
     normalized = cls.normalize_vendor_name(vendor_key)
     for key, info in cls.VENDORS.items():
         if info['name'] == normalized and 'source_file' in info:
             return info['source_file']
-    
+
     # Fallback
     return f"{vendor_key.upper()}({vendor_key[:2].upper()})"
 ```
@@ -485,7 +515,7 @@ elif "Source_File" not in hitachi_data.columns:
    HITACHI rows: 7,028
      Source_File="HITACHI(HE)": 7,028
      ✅ PASS: All HITACHI → HITACHI(HE)
-   
+
    SIEMENS rows: 1,606
      Source_File="SIEMENS(SIM)": 1,606
      ✅ PASS: All SIEMENS → SIEMENS(SIM)
@@ -545,7 +575,7 @@ elif "Source_File" not in hitachi_data.columns:
 
 #### 근본 원인
 **파일**: `config/pipeline_config.yaml`
-- **현재 (잘못됨)**: 
+- **현재 (잘못됨)**:
   - `master_file`: HVDC WAREHOUSE_HITACHI(HE).xlsx
   - `warehouse_file`: HVDC WAREHOUSE_HITACHI(HE).xlsx (동일 파일)
 - **실제 Master**: Case List_Hitachi.xlsx (6,856 Case)
@@ -556,7 +586,7 @@ elif "Source_File" not in hitachi_data.columns:
 1. `config/pipeline_config.yaml` (Line 23-25)
    - `master_file`: **Case List_Hitachi.xlsx** 로 변경
    - `output_file`: v3.9 → **v3.10**
-   
+
 2. `config/stage2_derived_config.yaml` (Line 14)
    - `synced_file`: v3.9_merged → **v3.10_merged**
 
@@ -600,7 +630,7 @@ variants = FileRegistry.get_sheet_variants('case_list')  # ['Case List, RIL', ..
 - Core 버전: v1.0.0 → **v1.1.0**
 
 ### Changed
-- **Stage 1 입력**: 
+- **Stage 1 입력**:
   - Master: HVDC WAREHOUSE → **Case List_Hitachi.xlsx**
   - Warehouse: HVDC WAREHOUSE (유지)
 - **Stage 1 출력**: v3.9 → **v3.10**
