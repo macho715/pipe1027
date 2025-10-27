@@ -17,6 +17,16 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 from datetime import datetime, timedelta
 import numpy as np
+import sys
+
+# Add parent directory to path for forecasting module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+try:
+    from scripts.forecasting.warehouse_forecast import forecast_warehouse_demand
+except ImportError:
+    print("[WARN] Forecasting module not available, forecast features disabled")
+    forecast_warehouse_demand = None
 
 
 def load_data(input_path, sheet_name="Case List, RIL", aisle_map_path=None):
@@ -267,10 +277,71 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 .reset_index()
             )
 
-    # Dashboard Layout - 확장 (4x2)
+    # 예측 데이터 생성 (forecast 모듈이 있을 경우)
+    forecast_data = None
+    has_forecast = forecast_warehouse_demand is not None
+    
+    if has_forecast and "Effective_SQM" in metrics["df_wh"].columns:
+        try:
+            print("[INFO] Generating forecasts...")
+            # 월별 SQM 집계
+            df_wh_monthly = metrics["df_wh"].copy()
+            df_wh_monthly["Month"] = pd.Timestamp("2025-10-28")  # Current date placeholder
+            monthly_sqm = df_wh_monthly.groupby("Month")["Effective_SQM"].sum().reset_index()
+            monthly_sqm.rename(columns={"Month": "Date", "Effective_SQM": "CBM"}, inplace=True)
+            
+            # 예측 실행 (90일 = 3개월)
+            if len(monthly_sqm) > 0:
+                cbm_fc, _, cost_fc = forecast_warehouse_demand(
+                    monthly_sqm,
+                    cbm_col="CBM",
+                    date_col="Date",
+                    horizon=90,
+                    confidence=0.90,
+                    rate_per_sqm=47.0
+                )
+                forecast_data = {
+                    "cbm": cbm_fc.df,
+                    "cost": cost_fc
+                }
+                print(f"[OK] Forecast generated: {len(cbm_fc.df)} days")
+        except Exception as e:
+            print(f"[WARN] Forecast generation failed: {e}")
+            has_forecast = False
+
+    # Dashboard Layout - 확장 (4x2 또는 5x2)
     has_aisle = aisle_data is not None and len(aisle_data) > 0
 
-    if has_aisle:
+    if has_aisle and has_forecast:
+        # 5x2 레이아웃 (Aisle + Forecast)
+        fig = make_subplots(
+            rows=5,
+            cols=2,
+            subplot_titles=(
+                "Current Inventory (Cases)",
+                "Monthly Flow (In/Out)",
+                "SQM Utilization Gauge",
+                "SQM by Storage",
+                "Aisle Utilization (A1-A8)",
+                "Bottleneck by Aisle (>90 days)",
+                "SQM Forecast (Next 90 Days)",
+                "Cost Forecast (Next 90 Days)",
+                "Inbound Heatmap",
+                "Outbound Heatmap",
+            ),
+            specs=[
+                [{"type": "bar"}, {"type": "scatter"}],
+                [{"type": "indicator"}, {"type": "pie"}],
+                [{"type": "bar"}, {"type": "bar"}],
+                [{"type": "scatter"}, {"type": "scatter"}],
+                [{"type": "heatmap"}, {"type": "heatmap"}],
+            ],
+            vertical_spacing=0.06,
+            horizontal_spacing=0.12,
+            row_heights=[0.2, 0.2, 0.2, 0.2, 0.2],
+        )
+    elif has_aisle:
+        # 4x2 레이아웃 (Aisle만)
         fig = make_subplots(
             rows=4,
             cols=2,
@@ -429,7 +500,67 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
                 col=2,
             )
 
-        heatmap_row = 4
+        # 7 & 8. 예측 차트 (Forecast 데이터가 있을 경우)
+        if has_forecast and forecast_data is not None:
+            # 7. SQM Forecast
+            fc_cbm = forecast_data["cbm"]
+            fig.add_trace(
+                go.Scatter(
+                    x=fc_cbm["date"],
+                    y=fc_cbm["yhat"],
+                    mode="lines",
+                    name="Forecast",
+                    line=dict(color="#9467bd", width=2),
+                ),
+                row=4,
+                col=1,
+            )
+            # Confidence intervals
+            fig.add_trace(
+                go.Scatter(
+                    x=fc_cbm["date"].tolist() + fc_cbm["date"].tolist()[::-1],
+                    y=fc_cbm["yhat_high"].tolist() + fc_cbm["yhat_low"].tolist()[::-1],
+                    fill="toself",
+                    fillcolor="rgba(148, 103, 189, 0.2)",
+                    line=dict(color="rgba(255,255,255,0)"),
+                    showlegend=False,
+                    name="Confidence Interval",
+                ),
+                row=4,
+                col=1,
+            )
+
+            # 8. Cost Forecast
+            fc_cost = forecast_data["cost"]
+            fig.add_trace(
+                go.Scatter(
+                    x=fc_cost["date"],
+                    y=fc_cost["cost_forecast"],
+                    mode="lines",
+                    name="Cost Forecast",
+                    line=dict(color="#e377c2", width=2),
+                ),
+                row=4,
+                col=2,
+            )
+            # Cost confidence intervals
+            fig.add_trace(
+                go.Scatter(
+                    x=fc_cost["date"].tolist() + fc_cost["date"].tolist()[::-1],
+                    y=fc_cost["cost_high"].tolist() + fc_cost["cost_low"].tolist()[::-1],
+                    fill="toself",
+                    fillcolor="rgba(227, 119, 194, 0.2)",
+                    line=dict(color="rgba(255,255,255,0)"),
+                    showlegend=False,
+                    name="Cost CI",
+                ),
+                row=4,
+                col=2,
+            )
+            
+            heatmap_row = 5
+        else:
+            heatmap_row = 4
     else:
         heatmap_row = 3
 
@@ -453,12 +584,15 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
     )
 
     # Layout & Annotations
-    dashboard_height = 1400 if has_aisle else 1100
-    edition_text = (
-        "Ultimate Edition v4.0.48 with Aisle Map & Bottleneck Analysis"
-        if has_aisle
-        else "Ultimate Edition with Stacking, Dwell & Turnover"
-    )
+    if has_aisle and has_forecast:
+        dashboard_height = 1600  # 5x2 layout with forecast
+        edition_text = "Ultimate Edition v4.0.49 - Aisle Map, Bottleneck & Predictive Forecasting"
+    elif has_aisle:
+        dashboard_height = 1400  # 4x2 layout with aisle
+        edition_text = "Ultimate Edition v4.0.48 with Aisle Map & Bottleneck Analysis"
+    else:
+        dashboard_height = 1100  # 3x2 layout basic
+        edition_text = "Ultimate Edition with Stacking, Dwell & Turnover"
 
     fig.update_layout(
         height=dashboard_height,
