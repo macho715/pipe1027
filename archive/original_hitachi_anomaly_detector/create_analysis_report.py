@@ -367,10 +367,10 @@ class AnalysisReportGenerator:
 
     def __init__(self):
         self.colors = {
-            "RED": "FF0000",  # 시간 역전
-            "ORANGE": "FFC000",  # ML 이상치 (높음)
-            "YELLOW": "FFFF00",  # ML 이상치 (보통)
-            "PURPLE": "CC99FF",  # 데이터 품질
+            "RED": "FFFF0000",  # 시간 역전
+            "ORANGE": "FFFFC000",  # ML 이상치 (높음)
+            "YELLOW": "FFFFFF00",  # ML 이상치 (보통)
+            "PURPLE": "FFCC99FF",  # 데이터 품질
         }
 
     def create_report(self, json_path: str, output_path: str) -> bool:

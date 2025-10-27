@@ -21,8 +21,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill
 
 # ===== Config =====
-ORANGE = "FFC000"  # changed date cell
-YELLOW = "FFFF00"  # new row
+ORANGE = "FFFFC000"  # changed date cell (ARGB format)
+YELLOW = "FFFFFF00"  # new row (ARGB format)
 DATE_KEYS = [
     "ETD/ATD",
     "ETA/ATA",
@@ -283,8 +283,8 @@ class DataSynchronizerV29NoSorting:
                         def __init__(
                             self,
                             change_tracker,
-                            orange_hex="FFC000",
-                            yellow_hex="FFFF00",
+                            orange_hex="FFFFC000",
+                            yellow_hex="FFFFFF00",
                         ):
                             self.ct = change_tracker
                             self.orange = PatternFill(

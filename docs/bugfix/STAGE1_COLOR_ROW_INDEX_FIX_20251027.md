@@ -1,8 +1,8 @@
 # Stage 1 색상 적용 row_index 불일치 버그 수정
 
-**날짜**: 2025-10-27  
-**버전**: v4.0.47  
-**작업자**: AI Assistant  
+**날짜**: 2025-10-27
+**버전**: v4.0.47
+**작업자**: AI Assistant
 **이슈**: Case No. 208455 RL 매칭 오류 - 잘못된 행에 색상 적용
 
 ---
@@ -36,7 +36,7 @@
 for key, mi in master_index.items():
     if key in wh_index:
         wi = wh_index[key]  # 원본 Warehouse DataFrame 인덱스
-        
+
         # 날짜 변경 감지 및 기록
         if not self._dates_equal(mval, wval):
             wh.at[wi, w_col] = mval
@@ -85,7 +85,7 @@ Case No. 208455 발견: Excel 행 1712
 
 ### 수정 1: Change 클래스에 case_no 필드 추가
 
-**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`  
+**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`
 **라인**: 140-150
 
 ```python
@@ -104,7 +104,7 @@ class Change:
 
 ### 수정 2: ChangeTracker.add_change에 case_no 매개변수 추가
 
-**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`  
+**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`
 **라인**: 170-182
 
 ```python
@@ -125,7 +125,7 @@ def add_change(self, **kw):
 
 ### 수정 3: _apply_updates에서 case_no 기록
 
-**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`  
+**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`
 **라인**: 1346-1354, 1365-1373, 1391-1399
 
 ```python
@@ -186,7 +186,7 @@ for semantic_key in master_only_keys:
 
 ### 수정 4: _apply_excel_formatting에서 case_to_row 매핑 구축
 
-**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`  
+**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`
 **라인**: 1765-1790
 
 ```python
@@ -198,7 +198,7 @@ for c_idx, cell in enumerate(ws[excel_header_row], start=1):
         continue
     header_name = str(cell.value).strip()
     header_map[header_name] = c_idx
-    
+
     # Find Case No. column
     if "Case" in header_name and "No" in header_name:
         case_no_col_idx = c_idx
@@ -218,7 +218,7 @@ if case_no_col_idx:
 
 ### 수정 5: 색상 적용 시 Case No.로 행 검색
 
-**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`  
+**파일**: `scripts/stage1_sync_sorted/data_synchronizer_v30.py`
 **라인**: 1804-1838
 
 ```python
@@ -459,8 +459,8 @@ git push origin main
 
 ---
 
-**작성일**: 2025-10-27  
-**작성자**: AI Assistant  
-**검토자**: User (확인: "이제 정확히 기록된다")  
+**작성일**: 2025-10-27
+**작성자**: AI Assistant
+**검토자**: User (확인: "이제 정확히 기록된다")
 **버전**: HVDC Pipeline v4.0.47
 

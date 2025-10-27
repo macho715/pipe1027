@@ -1770,7 +1770,7 @@ class DataSynchronizerV30:
                     continue
                 header_name = str(cell.value).strip()
                 header_map[header_name] = c_idx
-                
+
                 # Find Case No. column
                 if "Case" in header_name and "No" in header_name:
                     case_no_col_idx = c_idx
@@ -1779,7 +1779,7 @@ class DataSynchronizerV30:
                 f"      [DEBUG] Header map size: {len(header_map)}, first 5: {list(header_map.keys())[:5]}"
             )
             print(f"      [DEBUG] Case No. column index: {case_no_col_idx}")
-            
+
             # ✅ Phase 4: Build Case No. → Excel row mapping
             case_to_row = {}
             if case_no_col_idx:
@@ -1812,7 +1812,9 @@ class DataSynchronizerV30:
                     # Fallback to old method if case_no not available
                     excel_row = change.row_index + excel_header_row + 1
                     if change.case_no:
-                        print(f"      [WARN] Case No. '{change.case_no}' not found in case_to_row mapping, using fallback row {excel_row}")
+                        print(
+                            f"      [WARN] Case No. '{change.case_no}' not found in case_to_row mapping, using fallback row {excel_row}"
+                        )
 
                 # Level 1: Use semantic key mapping (most accurate)
                 actual_col_name = self.change_tracker.get_column_name(
