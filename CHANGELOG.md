@@ -5,6 +5,49 @@ All notable changes to the HVDC Pipeline project will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.46] - 2025-10-27
+
+### ✨ Added - FlexibleNameResolver 도입 (GitHub PR #4)
+
+#### FlexibleNameResolver: Unicode-aware Name Matching System
+- **Purpose**: 헤더명, 파일명, 시트명을 유연하게 매칭하는 시스템
+- **Features**:
+  - Unicode 문자 지원 (한글, 일본어 등)
+  - 파일명 별칭(alias) 해석 기능
+  - 시트명 퍼지 매칭
+  - 헤더명 정규화 및 정규표현식 지원
+- **Implementation**:
+  - `scripts/core/name_resolver.py` 추가 (+127 lines)
+  - Core 패키지에서 re-export 설정
+- **Tests**: 
+  - `tests/test_name_resolver.py` 추가 (+73 lines)
+  - 다국어 헤더/파일/시트명 회귀 테스트
+  - pytest 실행: 모든 테스트 통과 ✅
+- **Files Modified** (PR #4):
+  - `scripts/core/name_resolver.py` (new, +127 lines)
+  - `tests/test_name_resolver.py` (new, +73 lines)
+  - `scripts/core/__init__.py` (re-export resolver)
+  - Total: 3 files, +203 lines
+- **Impact**: 
+  - 다국어 파일/시트명 처리 능력 향상
+  - 유연한 이름 매칭으로 파이프라인 안정성 개선
+
+### 🔧 Changed - Semantic Matcher 테스트 강화 (GitHub PR #3)
+
+#### Enhanced Test Coverage for MatchReport
+- **Improvement**: 컬럼 패딩 검증 테스트 개선 및 pytest fixture 사용
+- **Changes**:
+  - 인용 부호 제거: `f"'{result.column_name:<30s}'"` → `f"{result.column_name:<30s}"`
+  - pytest capfd fixture로 stdout 캡처
+  - 컬럼 패딩 정확성 검증 로직 강화
+- **Files Modified** (PR #3):
+  - `scripts/core/semantic_matcher.py` (포맷 개선)
+  - `tests/core/test_semantic_matcher.py` (테스트 강화, +60 lines)
+- **Testing**: `pytest -q` 통과, black/isort 검증 ✅
+- **Impact**:
+  - 출력 포맷 정확성 향상
+  - 테스트 신뢰성 개선
+
 ## [4.0.45] - 2025-10-27
 
 ### 🐛 Fixed - GitHub PR #1 & #2 버그 수정
