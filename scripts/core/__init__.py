@@ -14,37 +14,65 @@ Main Components:
 - data_parser: Core data parsing utilities (Stack_Status, SQM, unit conversions)
 """
 
-from .header_detector import HeaderDetector, detect_header_row
+from .data_parser import (
+    calculate_sqm,
+    convert_mm_to_cm,
+    map_stack_status,
+    parse_stack_status,
+)
+from .file_registry import (
+    FileRegistry,
+    get_master_file,
+    get_source_file_name,
+    get_synced_file,
+    get_warehouse_file,
+    normalize_vendor_name,
+)
+from .header_detector import (
+    HeaderDetectionResult,
+    HeaderDetector,
+    detect_header_row,
+    detect_header_row_with_diagnostics,
+)
 from .header_normalizer import HeaderNormalizer, normalize_header
-from .semantic_matcher import SemanticMatcher, find_header_by_meaning
-from .header_registry import HeaderRegistry, HVDC_HEADER_REGISTRY, HeaderCategory, HeaderDefinition
+from .header_registry import (
+    HVDC_HEADER_REGISTRY,
+    HeaderCategory,
+    HeaderDefinition,
+    HeaderRegistry,
+)
 from .name_resolver import FlexibleNameResolver, MatchResult
-from .data_parser import parse_stack_status, calculate_sqm, convert_mm_to_cm, map_stack_status
+from .semantic_matcher import SemanticMatcher, find_header_by_meaning
 from .standard_header_order import (
-    STANDARD_HEADER_ORDER,
-    STAGE2_HEADER_ORDER,
     STAGE1_BASE_COLS_ORDER,
+    STAGE2_HEADER_ORDER,
+    STANDARD_HEADER_ORDER,
     HeaderOrderManager,
 )
-from .file_registry import FileRegistry, get_master_file, get_warehouse_file, get_synced_file, normalize_vendor_name, get_source_file_name
+
 
 # Convenience functions for getting warehouse/site/date columns from registry
 def get_warehouse_columns(use_primary_alias=True):
     """Get warehouse columns from central registry."""
     return HVDC_HEADER_REGISTRY.get_warehouse_columns(use_primary_alias)
 
+
 def get_site_columns(use_primary_alias=True):
     """Get site columns from central registry."""
     return HVDC_HEADER_REGISTRY.get_site_columns(use_primary_alias)
+
 
 def get_date_columns(use_primary_alias=True):
     """Get date columns from central registry."""
     return HVDC_HEADER_REGISTRY.get_date_columns(use_primary_alias)
 
+
 __version__ = "1.2.0"
 __all__ = [
     "HeaderDetector",
+    "HeaderDetectionResult",
     "detect_header_row",
+    "detect_header_row_with_diagnostics",
     "HeaderNormalizer",
     "normalize_header",
     "SemanticMatcher",
