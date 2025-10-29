@@ -6,6 +6,50 @@
 
 ## 🚀 최근 업데이트
 
+### v4.0.53 - Stage 1 Standalone 패키지 출시 (2025-10-29)
+
+#### 🎁 Standalone 실행 파일 제공
+
+**주요 성과**:
+- **GUI 실행 파일**: Python 설치 없이 더블클릭으로 실행 가능한 `Stage1Sync.exe`
+- **CLI 실행 파일**: 명령줄에서 사용 가능한 `stage1_cli.exe`
+- **자동 빌드 시스템**: PyInstaller 기반 빌드 프로세스 자동화
+- **최적화된 빌드**: 경고 억제 및 빌드 시간 단축 (99%+ 경고 감소)
+
+**주요 기능**:
+- ✅ **GUI 인터페이스**: Tkinter 기반 직관적인 파일 선택 및 실행
+- ✅ **CLI 인터페이스**: 명령줄에서 자동화 스크립트 작성 가능
+- ✅ **실시간 로그**: 진행 상황 및 결과 실시간 표시
+- ✅ **자동 헤더 탐지**: 벤더별 자동 헤더 위치 탐지 (SIEMENS/HITACHI)
+- ✅ **시맨틱 매칭**: 헤더명 변형에도 유연하게 대응
+
+**빌드 결과**:
+- GUI 실행 파일: `dist/Stage1Sync.exe` (37.2 MB)
+- CLI 실행 파일: `dist/stage1_cli.exe` (34.1 MB)
+- 빌드 시간: 2-5분 (이전 15분+ 대비 70% 단축)
+
+**사용 방법**:
+```bash
+# GUI 실행 (더블클릭)
+dist\Stage1Sync.exe
+
+# CLI 실행
+dist\stage1_cli.exe --master "Master.xlsx" --warehouse "Warehouse.xlsx" --out "output.xlsx"
+```
+
+**관련 문서**:
+- [Stage 1 Standalone 기술보고서](scripts/stage1_Standalone/STAGE1_STANDALONE_TECHNICAL_REPORT.md) - 상세 아키텍처 및 구현 내용
+- [Standalone 사용자 가이드](scripts/stage1_Standalone/standalone/README_STANDALONE.md) - 빌드 및 사용 방법
+- [빌드 보고서](scripts/stage1_Standalone/standalone/STANDALONE_RECREATION_BUILD_REPORT.md) - 빌드 과정 및 최적화 상세
+
+**기술적 개선**:
+- PyInstaller hook 시스템으로 `pandas.tests` 경고 99%+ 억제
+- 벤더별 헤더 탐지 로직 (SIEMENS=행0, HITACHI=행4)
+- Standalone 환경을 위한 최소한의 core 모듈 포함
+- 헤더 위치 오탐지 대응 방안 문서화 완료
+
+---
+
 ### v4.0.52 - 전체 파이프라인 헤더 표준 63개로 통일 (2025-10-29)
 
 #### 🎯 헤더 표준화 작업 완료
@@ -856,6 +900,9 @@ hvdc_pipeline/
 │
 ├── scripts/
 │   ├── stage1_sync/                  # 데이터 동기화
+│   ├── stage1_Standalone/            # Standalone 실행 파일 패키지
+│   │   ├── standalone/               # 빌드 스크립트 및 실행 파일
+│   │   └── STAGE1_STANDALONE_TECHNICAL_REPORT.md
 │   ├── stage2_derived/               # 파생 컬럼 처리
 │   ├── stage3_report/                # 종합 보고서 생성
 │   └── stage4_anomaly/               # 이상치 탐지
@@ -1048,6 +1095,7 @@ tail -f logs/pipeline.log
 
 ### 📖 Stage별 상세 가이드
 - [Stage 1: 데이터 동기화](docs/STAGE1_USER_GUIDE.md) - Master/Warehouse 동기화 및 색상 표시
+- [Stage 1 Standalone: 독립 실행 파일](scripts/stage1_Standalone/standalone/README_STANDALONE.md) - GUI/CLI 실행 파일 사용 가이드
 - [Stage 2: 파생 컬럼 처리](docs/STAGE2_USER_GUIDE.md) - 13개 파생 컬럼 자동 계산
 - [Stage 3: 종합 보고서 생성](docs/STAGE3_USER_GUIDE.md) - 5개 시트 KPI 분석 보고서 (벡터화 최적화)
 - [Stage 4: 이상치 탐지](docs/STAGE4_USER_GUIDE.md) - 5가지 이상치 유형 자동 탐지
@@ -1060,6 +1108,7 @@ tail -f logs/pipeline.log
 ### 🔧 기술 문서
 - [파이프라인 실행 가이드](docs/PIPELINE_EXECUTION_GUIDE.md) - 상세한 실행 방법
 - [색상 문제 해결](docs/COLOR_FIX_SUMMARY.md) - 빈 셀 색상 문제 해결 완료 보고서
+- [Stage 1 Standalone 기술보고서](scripts/stage1_Standalone/STAGE1_STANDALONE_TECHNICAL_REPORT.md) - Standalone 패키지 아키텍처 및 구현 상세
 
 ## 📈 성능 지표
 
@@ -1091,6 +1140,6 @@ tail -f logs/pipeline.log
 
 ---
 
-**버전**: v4.0.52 (헤더 표준 63개로 통일)
+**버전**: v4.0.53 (Stage 1 Standalone 패키지 출시)
 **최종 업데이트**: 2025-10-29
 **문의**: AI Development Team
