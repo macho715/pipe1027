@@ -36,17 +36,19 @@ For details, see: @core/README.md and @core/INTEGRATION_GUIDE.md
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill
-import sys
+
 import os
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import numpy as np
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -54,13 +56,14 @@ sys.path.insert(0, str(project_root))
 
 # Import the new core header matching system
 from scripts.core import (
+    HVDC_HEADER_REGISTRY,
+    STAGE1_BASE_COLS_ORDER,
+    HeaderCategory,
+    HeaderDetectionResult,
+    HeaderDetector,
+    HeaderRegistry,
     SemanticMatcher,
     find_header_by_meaning,
-    detect_header_row,
-    HVDC_HEADER_REGISTRY,
-    HeaderCategory,
-    HeaderRegistry,
-    STAGE1_BASE_COLS_ORDER,
 )
 from scripts.core.standard_header_order import reorder_dataframe_columns
 
@@ -206,6 +209,23 @@ class SyncResult:
     matching_report: Optional[str] = None  # New: matching diagnostics
 
 
+@dataclass
+class HeaderCandidate:
+    """헤더 후보 정보를 저장합니다. | Container for header candidate metadata."""
+
+    row_index: int
+    source: str
+    confidence: float
+    threshold: float
+    warnings: List[str] = field(default_factory=list)
+
+    @property
+    def is_confident(self) -> bool:
+        """임계치 이상인지 확인합니다. | Check whether candidate meets threshold."""
+
+        return self.confidence >= self.threshold
+
+
 class DataSynchronizerV30:
     """
     Advanced data synchronizer with semantic header matching.
@@ -230,19 +250,27 @@ class DataSynchronizerV30:
         >>>     print(f"Error: {result.message}")
     """
 
-    def __init__(self, date_semantic_keys: Optional[List[str]] = None) -> None:
-        """
-        Initialize the synchronizer.
+    def __init__(
+        self,
+        date_semantic_keys: Optional[List[str]] = None,
+        header_overrides: Optional[Dict[Tuple[str, str], int]] = None,
+        min_header_confidence: float = 0.7,
+    ) -> None:
+        """동기화기를 초기화합니다. | Initialize the synchronizer."""
 
-        Args:
-            date_semantic_keys: List of semantic keys for date columns.
-                If None, uses the default DATE_SEMANTIC_KEYS.
-        """
         # Use semantic keys instead of hardcoded column names
         self.date_semantic_keys = date_semantic_keys or DATE_SEMANTIC_KEYS
 
         # Initialize the semantic matcher
         self.matcher = SemanticMatcher(min_confidence=0.7, allow_partial=True)
+
+        # Header detection helpers
+        self.header_confidence_threshold = min_header_confidence
+        self.header_detector = HeaderDetector(min_confidence=min_header_confidence)
+        self.manual_header_overrides: Dict[Tuple[str, str], int] = {}
+        if header_overrides:
+            for (file_label, sheet_name), row in header_overrides.items():
+                self.manual_header_overrides[(file_label.lower(), sheet_name.lower())] = int(row)
 
         # Change tracking
         self.change_tracker = ChangeTracker()
@@ -412,7 +440,154 @@ class DataSynchronizerV30:
 
         return "unknown"
 
-    def _detect_vendor_and_header_row(self, file_path: Path) -> Tuple[str, int]:
+    def _get_header_override(self, file_label: str, sheet_name: str) -> Optional[int]:
+        """수동 헤더 오버라이드를 조회합니다. | Fetch manual header override if configured."""
+
+        label = file_label.strip().lower()
+        sheet = sheet_name.strip().lower()
+        candidates = [
+            (label, sheet),
+            ("*", sheet),
+            (label, "*"),
+            ("*", "*"),
+        ]
+        for key in candidates:
+            if key in self.manual_header_overrides:
+                return self.manual_header_overrides[key]
+        return None
+
+    def _format_header_candidate(self, candidate: HeaderCandidate) -> str:
+        """헤더 후보 정보를 문자열로 표현합니다. | Format header candidate for logging."""
+
+        status = "confident" if candidate.is_confident else "low-confidence"
+        return (
+            f"row={candidate.row_index} via {candidate.source} "
+            f"(score={candidate.confidence:.2f}, threshold={candidate.threshold:.2f}, {status})"
+        )
+
+    def _build_header_candidates(
+        self,
+        file_label: str,
+        sheet_name: str,
+        vendor_header_row: Optional[int],
+        auto_result: HeaderDetectionResult,
+    ) -> List[HeaderCandidate]:
+        """헤더 후보 목록을 생성합니다. | Build ordered list of header candidates."""
+
+        ordered: List[HeaderCandidate] = []
+        seen: Set[int] = set()
+
+        manual_row = self._get_header_override(file_label, sheet_name)
+        if manual_row is not None and manual_row >= 0:
+            ordered.append(
+                HeaderCandidate(
+                    row_index=manual_row,
+                    source="manual",
+                    confidence=1.0,
+                    threshold=self.header_confidence_threshold,
+                )
+            )
+            seen.add(manual_row)
+
+        if auto_result.row_index not in seen:
+            ordered.append(
+                HeaderCandidate(
+                    row_index=auto_result.row_index,
+                    source=f"auto:{auto_result.method}",
+                    confidence=auto_result.confidence,
+                    threshold=auto_result.threshold,
+                    warnings=list(auto_result.warnings),
+                )
+            )
+            seen.add(auto_result.row_index)
+
+        if vendor_header_row is not None and vendor_header_row not in seen:
+            ordered.append(
+                HeaderCandidate(
+                    row_index=vendor_header_row,
+                    source="vendor",
+                    confidence=0.95,
+                    threshold=self.header_confidence_threshold,
+                )
+            )
+
+        return ordered
+
+    def _basic_header_validation(self, df: pd.DataFrame) -> Tuple[bool, str]:
+        """기본 시맨틱 검증으로 헤더를 확인합니다. | Validate header using core semantic key."""
+
+        report = self.matcher.match_dataframe(df, ["case_number"])
+        column_name = report.get_column_name("case_number")
+        if column_name:
+            return True, column_name
+        return False, "Missing semantic key 'case_number'"
+
+    def _load_sheet_with_candidates(
+        self,
+        xl: pd.ExcelFile,
+        file_path: str,
+        sheet_name: str,
+        file_label: str,
+        vendor_header_row: Optional[int],
+    ) -> Tuple[pd.DataFrame, HeaderCandidate]:
+        """헤더 후보를 순차 적용하여 시트를 로드합니다. | Load sheet trying header candidates."""
+
+        auto_result = self.header_detector.detect_with_diagnostics(
+            file_path=file_path,
+            sheet_name=sheet_name,
+        )
+
+        candidates = self._build_header_candidates(
+            file_label=file_label,
+            sheet_name=sheet_name,
+            vendor_header_row=vendor_header_row,
+            auto_result=auto_result,
+        )
+
+        if not candidates:
+            raise ValueError(f"No header candidates available for {file_label}:{sheet_name}")
+
+        errors: List[str] = []
+        for candidate in candidates:
+            if candidate.warnings:
+                for warning in candidate.warnings:
+                    print(
+                        f"  [WARN] Candidate {candidate.row_index} ({candidate.source}): {warning}"
+                    )
+
+            print(f"  [TRY] {self._format_header_candidate(candidate)}")
+
+            df = pd.read_excel(
+                xl,
+                sheet_name=sheet_name,
+                header=candidate.row_index,
+                engine="openpyxl",
+            )
+
+            if df.empty:
+                errors.append(f"row {candidate.row_index} produced empty DataFrame")
+                print("  [WARN] Loaded DataFrame is empty; trying next candidate")
+                continue
+
+            valid, detail = self._basic_header_validation(df)
+            if valid:
+                if not candidate.is_confident:
+                    print(
+                        f"  [WARN] Confidence {candidate.confidence:.2f} below "
+                        f"threshold {candidate.threshold:.2f}"
+                    )
+                print(f"  [OK] Header validated via column '{detail}'")
+                return df, candidate
+
+            errors.append(f"row {candidate.row_index} missing required column (detail: {detail})")
+            print(f"  [WARN] Candidate {candidate.row_index} failed validation: {detail}")
+
+        joined = "; ".join(errors)
+        raise ValueError(
+            f"Unable to resolve header for {file_label}:{sheet_name} (tried: {joined})"
+        )
+
+    def _detect_vendor_and_header_row(self, file_path: Path) -> Tuple[str, Optional[int]]:
         """
         Detect vendor type and appropriate header row based on file name.
 
@@ -424,10 +599,11 @@ class DataSynchronizerV30:
         """
         file_norm = file_path.stem.lower()
 
-        if "simense" in file_norm or "sim" in file_norm:
+        if "siem" in file_norm or "simense" in file_norm:
             return ("SIEMENS", 0)  # SIEMENS는 첫 행이 헤더
-        else:
+        if "hitachi" in file_norm or "hvdc" in file_norm:
             return ("HITACHI", 4)  # HITACHI는 5번째 행이 헤더
+        return ("UNKNOWN", None)
 
     def _load_master_files(self, master_xlsx: str) -> Dict[str, pd.DataFrame]:
         """
@@ -617,14 +793,18 @@ class DataSynchronizerV30:
         print(f"{'='*60}")
 
         xl = pd.ExcelFile(file_path, engine="openpyxl")
-        all_dfs = []
-        header_row = None
+        all_dfs: List[pd.DataFrame] = []
+        header_row: Optional[int] = None
 
         print(f"Found {len(xl.sheet_names)} sheets in file")
 
-        # Detect vendor and appropriate header row
         vendor_type, vendor_header_row = self._detect_vendor_and_header_row(Path(file_path))
-        print(f"[INFO] Detected vendor: {vendor_type}, using header row: {vendor_header_row}")
+        if vendor_header_row is not None:
+            print(f"[INFO] Detected vendor: {vendor_type}, default header row {vendor_header_row}")
+        else:
+            print(
+                f"[INFO] Vendor could not be determined from name; falling back to heuristic detection"
+            )
 
         for sheet_name in xl.sheet_names:
             print(f"\n  Loading sheet: '{sheet_name}'")
@@ -634,25 +814,18 @@ class DataSynchronizerV30:
                 print(f"  [SKIP] Aggregate sheet (not Case data)")
                 continue
 
-            # Use vendor-specific header row
-            sheet_header_row = vendor_header_row
-            confidence = 1.0  # Vendor-specific detection is 100% confident
+            df, candidate = self._load_sheet_with_candidates(
+                xl=xl,
+                file_path=file_path,
+                sheet_name=sheet_name,
+                file_label=file_label,
+                vendor_header_row=vendor_header_row,
+            )
+
+            sheet_header_row = candidate.row_index
 
             if header_row is None:
                 header_row = sheet_header_row
-
-            print(
-                f"  [OK] Header at row {sheet_header_row} (confidence: {confidence:.0%}) [{vendor_type}]"
-            )
-
-            # Load sheet
-            df = pd.read_excel(
-                xl, sheet_name=sheet_name, header=sheet_header_row, engine="openpyxl"
-            )
-
-            if df.empty:
-                print(f"  [SKIP] Empty sheet")
-                continue
 
             # Track source sheet (preserve original sheet name)
             df["Source_Sheet"] = sheet_name
@@ -730,10 +903,17 @@ class DataSynchronizerV30:
         print(f"{'='*60}")
 
         xl = pd.ExcelFile(file_path, engine="openpyxl")
-        sheet_data = {}
-        header_row = None
+        sheet_data: Dict[str, Tuple[pd.DataFrame, int]] = {}
 
         print(f"Found {len(xl.sheet_names)} sheets in file")
+
+        vendor_type, vendor_header_row = self._detect_vendor_and_header_row(Path(file_path))
+        if vendor_header_row is not None:
+            print(f"[INFO] Detected vendor: {vendor_type}, default header row {vendor_header_row}")
+        else:
+            print(
+                f"[INFO] Vendor could not be determined from name; falling back to heuristic detection"
+            )
 
         for sheet_name in xl.sheet_names:
             print(f"\n  Loading sheet: '{sheet_name}'")
@@ -743,22 +923,15 @@ class DataSynchronizerV30:
                 print(f"  [SKIP] Aggregate sheet (not Case data)")
                 continue
 
-            # Detect header row for this sheet
-            sheet_header_row, confidence = detect_header_row(file_path, sheet_name)
-
-            if header_row is None:
-                header_row = sheet_header_row
-
-            print(f"  [OK] Header at row {sheet_header_row} (confidence: {confidence:.0%})")
-
-            # Load sheet
-            df = pd.read_excel(
-                xl, sheet_name=sheet_name, header=sheet_header_row, engine="openpyxl"
+            df, candidate = self._load_sheet_with_candidates(
+                xl=xl,
+                file_path=file_path,
+                sheet_name=sheet_name,
+                file_label=file_label,
+                vendor_header_row=vendor_header_row,
             )
 
-            if df.empty:
-                print(f"  [SKIP] Empty sheet")
-                continue
+            sheet_header_row = candidate.row_index
 
             # Track source sheet (preserve original sheet name)
             df["Source_Sheet"] = sheet_name
@@ -779,6 +952,44 @@ class DataSynchronizerV30:
 
         print(f"\n[OK] Loaded {len(sheet_data)} sheets")
         return sheet_data
+
+    @staticmethod
+    def parse_header_override_args(
+        overrides: Optional[List[str]],
+    ) -> Dict[Tuple[str, str], int]:
+        """헤더 오버라이드 인자를 파싱합니다. | Parse manual header override arguments."""
+
+        parsed: Dict[Tuple[str, str], int] = {}
+        if not overrides:
+            return parsed
+
+        for raw in overrides:
+            if "=" not in raw:
+                raise ValueError(
+                    "Header override must follow <file_label>:<sheet>=<row_index> format"
+                )
+            target, row_str = raw.split("=", 1)
+            if ":" in target:
+                file_label, sheet_name = target.split(":", 1)
+            else:
+                file_label, sheet_name = "*", target
+
+            file_label = file_label.strip() or "*"
+            sheet_name = sheet_name.strip() or "*"
+
+            try:
+                row_index = int(row_str)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid row index for header override '{raw}': {row_str}"
+                ) from exc
+
+            if row_index < 0:
+                raise ValueError(f"Header override row index must be >= 0 (got {row_index})")
+
+            parsed[(file_label.lower(), sheet_name.lower())] = row_index
+
+        return parsed
 
     def _filter_invalid_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -935,7 +1146,7 @@ class DataSynchronizerV30:
         """
         # Get column order from core registry (Single Source of Truth)
         # All warehouse/site column definitions are centrally managed in @core/header_registry.py
-        from core import get_warehouse_columns, get_site_columns
+        from core import get_site_columns, get_warehouse_columns
 
         WAREHOUSE_ORDER = get_warehouse_columns()
         SITE_ORDER = get_site_columns()
@@ -1612,7 +1823,9 @@ class DataSynchronizerV30:
                         df, is_stage2=False, keep_unlisted=False, use_semantic_matching=True
                     )
                     df_reordered.to_excel(writer, sheet_name=clean_sheet_name, index=False)
-                    print(f"    - {clean_sheet_name}: {len(df)} rows, {len(df_reordered.columns)} columns (standard order)")
+                    print(
+                        f"    - {clean_sheet_name}: {len(df)} rows, {len(df_reordered.columns)} columns (standard order)"
+                    )
 
             print(f"  [OK] Saved {len(processed_sheets)} sheets")
 
@@ -1781,7 +1994,7 @@ class DataSynchronizerV30:
                     continue
                 header_name = str(cell.value).strip()
                 header_map[header_name] = c_idx
-                
+
                 # Find Case No. column
                 if "Case" in header_name and "No" in header_name:
                     case_no_col_idx = c_idx
@@ -1790,7 +2003,7 @@ class DataSynchronizerV30:
                 f"      [DEBUG] Header map size: {len(header_map)}, first 5: {list(header_map.keys())[:5]}"
             )
             print(f"      [DEBUG] Case No. column index: {case_no_col_idx}")
-            
+
             # ✅ Phase 4: Build Case No. → Excel row mapping
             case_to_row = {}
             if case_no_col_idx:
@@ -1822,7 +2035,9 @@ class DataSynchronizerV30:
                     # Fallback to old method if case_no not available
                     excel_row = change.row_index + excel_header_row + 1
                     if change.case_no:
-                        print(f"      [WARN] Case No. '{change.case_no}' not found in case_to_row mapping")
+                        print(
+                            f"      [WARN] Case No. '{change.case_no}' not found in case_to_row mapping"
+                        )
 
                 # Level 1: Use semantic key mapping (most accurate)
                 actual_col_name = self.change_tracker.get_column_name(
@@ -1946,6 +2161,15 @@ if __name__ == "__main__":
     ap.add_argument("--master", required=True, help="Path to Master Excel file")
     ap.add_argument("--warehouse", required=True, help="Path to Warehouse Excel file")
     ap.add_argument("--out", default="", help="Output path (optional)")
+    ap.add_argument(
+        "--header-override",
+        action="append",
+        default=[],
+        help=(
+            "Manual header row override (<file_label>:<sheet>=<row>, use '*' for wildcard). "
+            "Provide multiple times for multiple sheets."
+        ),
+    )
     args = ap.parse_args()
 
     print("\n" + "=" * 60)
@@ -1953,7 +2177,12 @@ if __name__ == "__main__":
     print("Semantic Header Matching Edition")
     print("=" * 60)
 
-    sync = DataSynchronizerV30()
+    try:
+        overrides = DataSynchronizerV30.parse_header_override_args(args.header_override)
+    except ValueError as override_error:
+        ap.error(str(override_error))
+
+    sync = DataSynchronizerV30(header_overrides=overrides)
     res = sync.synchronize(args.master, args.warehouse, args.out or None)
 
     print("\n" + "=" * 60)

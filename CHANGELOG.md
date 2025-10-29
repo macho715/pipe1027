@@ -5,6 +5,34 @@ All notable changes to the HVDC Pipeline project will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.54] - 2025-10-30
+
+### ✨ Added - Standalone 헤더 진단 연동
+
+- `stage1_Standalone` 패키지에 `HeaderDetectionResult` 경량판과
+  `detect_header_row_with_diagnostics()` 래퍼를 추가해 휴리스틱 탐지 결과 경고를 확인할 수 있게 했습니다.
+- Standalone `DataSynchronizerV30`에 헤더 후보 빌더, 시맨틱 검증, 수동 오버라이드 지원을 이식하여
+  메인 파이프라인과 동일한 안정성을 확보했습니다.
+- CLI(`stage1_standalone.py`)에 `--header-override` 옵션을 추가해 독립 실행 파일에서도
+  헤더 행을 직접 지정할 수 있도록 했습니다.
+
+## [4.0.53] - 2025-10-30
+
+### ✨ Added - 헤더 탐지 안정화 & 수동 제어 옵션
+
+- `HeaderDetectionResult` 데이터 클래스를 도입하여 휴리스틱 탐지 결과에 대한 진단 정보를 제공하고, `detect_header_row_with_diagnostics()` 유틸리티를 추가했습니다.
+- `DataSynchronizerV30`에 수동 헤더 오버라이드 CLI 인자(`--header-override`)를 추가하여 사용자가 개별 시트의 헤더 행을 지정할 수 있도록 했습니다.
+- `_load_sheet_with_candidates()` 로직을 새로 구현하여 수동 → 휴리스틱 → 벤더 순으로 후보를 검증하며, `case_number` 시맨틱 키 매칭을 활용해 헤더 유효성을 재검증합니다.
+- 벤더 감지가 실패할 경우 기본값을 강제하지 않고 휴리스틱/수동 경로로 전환하도록 `_detect_vendor_and_header_row()`를 개선했습니다.
+- 새 통합 테스트(`tests/test_header_detection_strategy.py`)를 추가하여 수동 오버라이드 및 벤더 기반 폴백 동작을 검증합니다.
+
+### ⚙️ Changed - 기존 파이프라인 연계
+
+- `DataSynchronizerV30` 전반에서 신규 후보 로딩 로직을 사용하도록 `_load_file_with_header_detection()` 및 `_load_file_by_sheets()`를 업데이트했습니다.
+- 헤더 탐지 결과가 임계치(0.70) 미만일 경우 경고를 출력하고 대체 후보를 시도하도록 했습니다.
+
+---
+
 ## [4.0.52] - 2025-10-29
 
 ### 🎯 Changed - 전체 파이프라인 헤더 표준 63개로 통일

@@ -7,6 +7,7 @@ Stage 1 Standalone Runner
 from __future__ import annotations
 import argparse, sys
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 def _project_root() -> Path:
     # When frozen by PyInstaller, resources are unpacked to _MEIPASS
@@ -45,14 +46,25 @@ class _Tee:
         if self.orig:
             self.orig.flush()
 
-def run_sync(master: str, warehouse: str, out: str | None = None, log_cb=None):
+def run_sync(
+    master: str,
+    warehouse: str,
+    out: str | None = None,
+    header_overrides: Optional[Dict[Tuple[str, str], int]] = None,
+    log_cb=None,
+):
     DataSynchronizerV30 = _load_sync_class()
-    sync = DataSynchronizerV30()
+    sync = DataSynchronizerV30(header_overrides=header_overrides)
     orig_out, orig_err = sys.stdout, sys.stderr
     sys.stdout = _Tee(orig_out, log_cb)
     sys.stderr = _Tee(orig_err, log_cb)
     try:
-        res = sync.synchronize(master, warehouse, out or None)
+        res = sync.synchronize(
+            master,
+            warehouse,
+            out or None,
+            header_overrides=header_overrides,
+        )
         return bool(res.success), str(res.output_path), dict(res.stats or {})
     finally:
         sys.stdout, sys.stderr = orig_out, orig_err
@@ -62,8 +74,29 @@ def main():
     ap.add_argument("--master", required=True, help="Path to Master Excel file (.xlsx)")
     ap.add_argument("--warehouse", required=True, help="Path to Warehouse Excel file (.xlsx)")
     ap.add_argument("--out", default="", help="Optional output path (.xlsx)")
+    ap.add_argument(
+        "--header-override",
+        action="append",
+        default=[],
+        help=(
+            "Manual header row override (<file_label>:<sheet>=<row>, '*' allowed). "
+            "Repeat flag for multiple overrides."
+        ),
+    )
     args = ap.parse_args()
-    ok, out_path, _ = run_sync(args.master, args.warehouse, args.out or None)
+
+    DataSynchronizerV30 = _load_sync_class()
+    try:
+        overrides = DataSynchronizerV30.parse_header_override_args(args.header_override)
+    except ValueError as override_error:
+        ap.error(str(override_error))
+
+    ok, out_path, _ = run_sync(
+        args.master,
+        args.warehouse,
+        args.out or None,
+        header_overrides=overrides,
+    )
     sys.exit(0 if ok else 1)
 
 if __name__ == "__main__":
