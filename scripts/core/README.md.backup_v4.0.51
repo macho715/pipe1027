@@ -785,61 +785,31 @@ detector = HeaderDetector(
 
 ---
 
-## 📅 최근 업데이트
+## 📅 최근 업데이트 (v4.1.0 - 2025-10-27)
 
-### v4.0.51 - 프로젝트 전체 정리 (2025-10-29)
-
-#### 🧹 대대적인 구조 정리 완료
-**삭제된 파일/폴더 (총 약 50개):**
-- 루트 실행 파일 중복 4개 (run/과 동일한 파일들)
-- run/ 폴더 내 미사용 config 4개
-- 루트 임시/검증 파일 7개
-- data - 복사본/ 폴더 전체 (22개 파일)
-- backups/ 폴더 3개 하위 폴더
-- Jupyter notebooks 6개 → archive/notebooks/로 이동
-
-**scripts/ 문서 정리:**
-- `PATCH.MD` → `docs/reports/STAGE3_EXCEL_WRITER_FIX_v4.0.22.md`
-- `WHINOUT.MD` → `docs/reports/STAGE3_INBOUND_CALCULATION_FIX_v4.0.29.md`
-- `stack status.md`, `STACK.MD` 삭제 (이미 core/data_parser.py에 구현)
-
-**실행 경로 개선:**
-```bash
-# 권장 방법
-python run/run_pipeline.py --all
-
-# 또는 run/ 폴더 내에서
-cd run
-python run_pipeline.py --all
-```
-
-**run/run_pipeline.py 경로 수정:**
-- PROJECT_ROOT를 상위 폴더로 참조
-- config 파일을 PROJECT_ROOT/config/에서 로드
-- scripts 모듈 import 경로 수정
-
-#### 혜택
-- 루트 디렉토리 대폭 정리 (50개 파일 제거)
-- config 폴더 최신 설정 유지, 중복 제거
-- run/ 폴더 실행 스크립트만 보존
-- 프로젝트 구조 명확화 및 유지보수성 향상
-
-### v4.1.0 - 중앙화된 컬럼 관리 (2025-10-27)
+### 중앙화된 컬럼 관리 시스템 추가
 - **get_warehouse_columns()**: 9개 창고 목록 반환
-- **get_site_columns()**: 4개 사이트 목록 반환
+- **get_site_columns()**: 4개 사이트 목록 반환  
 - **get_date_columns()**: 모든 날짜 컬럼 반환
-- 전체 파이프라인 하드코딩 제거 (Stage 1-4)
-- CORE 의존성 공지 추가
-- 창고 정의 정리 (HAULER = Hauler Indoor)
 
-### v4.0.50 - Stage 2 사이트 컬럼 인식 수정 (2025-10-28)
-- Status_Location 사이트 위치 인식 수정
-- header_registry.py 사이트명 별칭 재추가
-- 스마트 컬럼 선택 로직 구현
-- 5,701개 사이트 위치 정상 인식 확인
+### 전체 파이프라인 하드코딩 제거
+- ✅ Stage 1: WAREHOUSE_ORDER, SITE_ORDER 제거
+- ✅ Stage 2: column_definitions.py Core 사용
+- ✅ Stage 3: column_definitions.py, report_generator.py Core 사용
+- ✅ Stage 4: 헤더 정규화 적용
 
-### v4.0.12 - 컬럼 순서 최적화 (2025-10-22)
-- Shifting/Source_Sheet 위치 최적화
-- DHL WH 데이터 복구
-- Multi-Sheet 안정성 개선
-- 아카이브 시스템 구축
+### CORE 의존성 공지 추가
+- 모든 스테이지 주요 파일에 정책 문서 추가
+- 하드코딩 금지 명시
+- Core 문서 링크 제공
+
+### 창고 정의 정리
+- "HAULER" = "Hauler Indoor" (동일한 창고)
+- 총 9개 창고, 4개 사이트로 정리
+- 모든 별칭 Registry에 등록
+
+### 이전 업데이트 (v4.0.12 - 2025-10-22)
+- **컬럼 순서 최적화**: Shifting/Source_Sheet 위치 최적화
+- **DHL WH 데이터 복구**: Location 컬럼 자동 처리
+- **Multi-Sheet 안정성**: 7개 이상 시트 처리 검증
+- **아카이브 시스템**: 임시 스크립트 체계적 관리

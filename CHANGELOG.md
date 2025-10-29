@@ -5,6 +5,344 @@ All notable changes to the HVDC Pipeline project will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.52] - 2025-10-29
+
+### 🎯 Changed - 전체 파이프라인 헤더 표준 63개로 통일
+
+#### 작업 개요
+전체 HVDC 파이프라인(Stage 1-4)의 출력 파일 헤더를 **표준 63개로 통일**하는 작업을 완료했습니다.
+
+#### 작업 전후 비교
+
+| Stage | 작업 전 | 작업 후 | 상태 |
+|-------|---------|---------|------|
+| Stage 1 (merged) | 68-69개 | **63개** | ✅ 완료 |
+| Stage 2 | 69개 | 64개 | 정상 (파생 컬럼 포함) |
+| Stage 3 | 70개 | **63개** | ✅ 완료 |
+| CORE | 63개 | **63개** | ✅ 표준 정의 유지 |
+
+#### 제거된 불필요한 컬럼
+
+다음 컬럼들이 모든 Stage에서 제거되었습니다:
+1. **`입고일자`** - Stage 2/3에서 임시로 생성되던 컬럼
+2. **`MIR Site`** - 중복 컬럼 (표준: `MIR`)
+3. **`SHU Site`** - 중복 컬럼 (표준: `SHU`)
+4. **`DAS Site`** - 중복 컬럼 (표준: `DAS`)
+5. **`AGI Site`** - 중복 컬럼 (표준: `AGI`)
+6. **`wh_handling_legacy.1`** - 이전 작업에서 생성되던 컬럼
+
+#### 수정된 파일
+
+**1. `scripts/core/header_registry.py`**
+- Site 컬럼의 primary alias를 "MIR Site"에서 "MIR"로 변경
+- Primary alias: "MIR", "SHU", "DAS", "AGI" (단축명)
+- 효과: Stage 1에서 "MIR Site" 등이 자동으로 추가되지 않음
+
+**2. `scripts/stage1_sync_sorted/data_synchronizer_v30.py`**
+- `reorder_dataframe_columns` 함수 import 및 적용
+- Multi-sheet 저장 시: `keep_unlisted=False`로 불필요한 컬럼 제거
+- Merged 파일 저장 시: 표준 63개 헤더로 재정렬
+
+**3. `scripts/stage3_report/report_generator.py`** (이전 작업)
+- `wh_handling_legacy` 컬럼 생성 제거
+- `입고일자` 컬럼 생성 제거
+- `reorder_dataframe_columns`에 `keep_unlisted=False` 적용
+
+**4. `scripts/core/standard_header_order.py`** (이전 작업)
+- `normalize_header_names_for_stage3()`에서 `wh_handling_legacy` 변환 제거
+
+#### 검증 결과
+
+- ✅ **Stage 1 (merged)**: 63개 헤더 ✅
+- ✅ **Stage 2**: 64개 헤더 (파생 컬럼 포함, 정상)
+- ✅ **Stage 3**: 63개 헤더 ✅
+- ✅ **CORE**: STANDARD_HEADER_ORDER 63개 정의 확인 ✅
+
+#### 주요 성과
+
+1. **헤더 통일성 확보**: 전체 파이프라인에서 표준 63개 헤더로 통일
+2. **불필요한 컬럼 제거**: 중복 및 임시 컬럼 완전 제거
+3. **표준 준수**: `header_order_comparison_report.xlsx`의 확정 순서와 100% 일치
+4. **코드 품질 향상**: `reorder_dataframe_columns` 적용으로 자동 정리 시스템 구축
+
+#### 기술적 세부사항
+
+**`keep_unlisted=False` 옵션**:
+- `reorder_dataframe_columns()` 함수에 적용하여 표준 순서에 없는 컬럼이 자동으로 제거되도록 했습니다
+- 표준 63개만 유지, 동적으로 생성되는 불필요한 컬럼 자동 제거
+- 각 Stage에서 일관된 출력 보장
+
+**Semantic Matching 활용**:
+- 모든 Stage에서 `use_semantic_matching=True`로 설정하여 헤더명 변형에도 유연하게 대응
+- "MIR"와 "MIR Site" 모두 인식 가능
+- 데이터 출처와 무관하게 일관된 처리
+
+#### 참고사항
+
+- **Stage 2 헤더 개수 (64개)**: 파생 컬럼(derived columns)을 추가하는 단계이므로 표준 63개보다 1개 많은 64개가 정상입니다
+- **Stage 1 Multi-sheet 파일 (62개)**: 각 시트별 파일은 `Source_Sheet` 컬럼이 없으므로 62개입니다. 이는 정상이며, merged 파일만 63개를 유지합니다
+
+#### 관련 문서
+- 상세 보고서: `docs/reports/HEADER_63_STANDARDIZATION_v4.0.52.md`
+
+---
+
+## [4.0.51] - 2025-10-29
+
+### 🧹 Cleanup - 프로젝트 전체 중복예전파일 정리 완료
+
+#### 정리 대상 및 결과
+
+**삭제된 파일/폴더 (총 약 50개):**
+
+1. **루트 실행 파일 중복 (4개)**
+   - `run_pipeline.py` (run/과 완전 동일)
+   - `run_full_pipeline.bat` (run/과 완전 동일)
+   - `run_full_pipeline.ps1` (run/과 완전 동일)
+   - `run_full_pipeline.sh` (run/과 완전 동일)
+
+2. **run/ 폴더 내 미사용 config 파일 (4개)**
+   - `run/pipeline_config.yaml` (config/가 최신)
+   - `run/project_profile.yaml` (미사용)
+   - `run/stage2_derived_config.yaml` (config/가 최신)
+   - `run/stage4_anomaly.yaml` (미사용)
+
+3. **루트 임시/검증 파일 (7개)**
+   - `verify_status_location_stage2.py`
+   - `find_sct_data.py`
+   - `import pandas as pd.py`
+   - `tmp_examples.py`
+   - `uploaded_nb_module.py`
+   - `tmp.xlsx`
+   - `Untitled-1.txt`
+
+4. **루트 Excel 파일 중복 (1개)**
+   - `Case List.xlsx` (scripts/raw/에 원본 존재)
+
+5. **data - 복사본/ 폴더 (22개 파일)**
+   - 전체 폴더 삭제 (원본 data/ 폴더 존재)
+
+6. **backups/ 폴더 정리 (3개 하위 폴더)**
+   - `backups/case_no_fix_20251028/`
+   - `backups/date_color_fix_20251028/`
+   - `backups/site_color_fix_20251028/`
+
+7. **Jupyter Notebooks 정리 (6개)**
+   - `wh*.ipynb` 파일들을 `archive/notebooks/` 폴더로 이동
+
+#### 수정된 파일
+
+**`run/run_pipeline.py` 경로 수정:**
+- `PROJECT_ROOT = PIPELINE_ROOT.parent` (상위 폴더 참조)
+- `sys.path.append(str(PROJECT_ROOT))` (scripts 모듈 import 경로)
+- `resolve_repo_path()` 함수에서 `PROJECT_ROOT` 사용
+- config 파일 경로를 `PROJECT_ROOT / "config"`로 수정
+
+#### 최종 프로젝트 구조
+
+```
+c:\PP 1027\
+├── archive/           (보존 - 역사적 기록)
+│   ├── notebooks/     (NEW - 분석 완료된 노트북)
+│   ├── old_reports/
+│   ├── old_scripts/
+│   └── original_*/
+├── config/            (보존 - 최신 설정, run/에서 참조)
+├── data/              (보존 - 데이터)
+├── docs/              (보존 - 문서)
+├── logs/              (보존 - 로그)
+├── run/               (보존 - 실행 스크립트만, config 제외)
+│   ├── run_pipeline.py
+│   ├── run_full_pipeline.bat
+│   ├── run_full_pipeline.ps1
+│   └── run_full_pipeline.sh
+├── scripts/           (보존 - 코드)
+├── tests/             (보존 - 테스트)
+├── README.md
+├── CHANGELOG.md
+├── CHANGELOG_DASHBOARD.md
+├── CODEOWNERS
+├── requirements.txt
+├── pyproject.toml
+├── pytest.ini
+└── almk_*.csv
+```
+
+#### 혜택
+
+- **루트 디렉토리**: 대폭 정리 (약 50개 파일 제거)
+- **config 폴더**: 최신 설정 유지, 중복 제거
+- **run/ 폴더**: 실행 스크립트만 보존, 혼동 제거
+- **프로젝트 구조**: 명확화 및 유지보수성 향상
+- **실행 방법**: `python run/run_pipeline.py` 또는 `cd run && python run_pipeline.py`
+
+#### 검증 완료
+
+- ✅ Stage 1 실행 성공 (67.79초)
+- ✅ config 파일 경로 정상 작동
+- ✅ scripts 모듈 import 정상
+- ✅ 전체 파이프라인 구조 정상 (파일 권한 이슈 제외)
+
+## [4.0.50] - 2025-10-28
+
+### 🐛 Fixed - Stage 2 사이트 컬럼 인식 문제 해결
+
+#### 문제
+- **Stage 2에서 사이트 위치를 인식하지 못함**:
+  - `Status_Location`: 창고만 표시 (5,141개), 사이트 0개
+  - `Status_Current`: "site" 상태 없음, "warehouse" 또는 "Pre Arrival"만 표시
+  - 실제 데이터: MIR (1,524), SHU (2,208), DAS (1,731), AGI (239) = 총 5,702개 사이트 날짜 존재
+
+#### 근본 원인
+1. **Header Registry 정의**: `scripts/core/header_registry.py`에서 standalone 사이트 이름("MIR", "SHU", "DAS", "AGI")이 aliases에서 제거됨 (v4.0.49에서 Description 컬럼 문제 수정 시)
+2. **Semantic Matcher 동작**: `find_header_by_meaning`이 primary alias ("MIR Site")를 반환하지만, 실제 데이터는 "MIR" 컬럼에 있음
+3. **Stage 2 컬럼 검색**: 
+   - `reorder_dataframe_columns`가 "MIR Site" 빈 컬럼을 추가하고 "MIR" 컬럼은 그대로 유지
+   - `calculate_derived_columns`와 `process_derived_columns`가 primary alias로만 컬럼을 찾아 빈 컬럼만 인식
+
+#### 해결 방법
+
+**1. Header Registry 수정** (`scripts/core/header_registry.py`):
+- Standalone 사이트 이름을 aliases에 **재추가** (우선순위는 낮게 유지)
+- Before: `["MIR Site", "MIR_Site", "MIR사이트"]`
+- After: `["MIR Site", "MIR_Site", "MIR사이트", "MIR"]`
+- 적용: mir, shu, das, agi 모든 사이트
+
+**2. Stage 2 컬럼 검색 로직 수정** (`scripts/stage2_derived/derived_columns_processor.py`):
+
+a) `calculate_derived_columns()` 함수 (Lines 199-225):
+```python
+# ✅ 모든 aliases를 확인하여 데이터가 있는 컬럼 찾기
+from core import HVDC_HEADER_REGISTRY
+
+st_cols = []
+for site_key in ['mir', 'shu', 'das', 'agi']:
+    definition = HVDC_HEADER_REGISTRY.get_definition(site_key)
+    for alias in definition.aliases:
+        if alias in working_df.columns and working_df[alias].notna().sum() > 0:
+            st_cols.append(alias)
+            break  # 첫 번째 데이터 있는 alias 사용
+```
+
+b) `process_derived_columns()` 함수 (Lines 449-472):
+- 동일한 로직 적용하여 `reorder_dataframe_columns` 이후 실제 데이터가 있는 컬럼 찾기
+
+#### 검증 결과
+- ✅ **사이트 위치**: 5,701개 (63.4%)
+  - MIR: 1,524개 (16.9%)
+  - SHU: 2,207개 (24.5%)
+  - DAS: 1,731개 (19.2%)
+  - AGI: 239개 (2.7%)
+- ✅ **Status_Current**: "site" 5,701개 (63.4%)
+- ✅ **창고 위치**: 3,121개 (34.7%) - 사이트로 이동한 화물 반영
+- ✅ **Pre Arrival**: 173개 (1.9%) - 입고된 화물 반영
+- ✅ **SCT-0082 화물**: 여전히 창고 (DSV Al Markaz/DSV Indoor) - 아직 사이트로 이동 안 함
+
+#### 변경 파일
+- `scripts/core/header_registry.py`:
+  - Lines 386-389: 사이트 semantic keys에 standalone names 재추가 ("MIR", "SHU", "DAS", "AGI")
+- `scripts/stage2_derived/derived_columns_processor.py`:
+  - Lines 199-225: `calculate_derived_columns()` - 실제 데이터가 있는 컬럼 찾기
+  - Lines 449-472: `process_derived_columns()` - 동일한 로직 적용
+
+#### 영향 범위
+- ✅ Stage 2: `Status_Location`, `Status_SITE`, `Status_Current` 정확도 대폭 향상
+- ✅ Stage 3: 사이트별 집계 정확도 향상 (창고 재고 과다 집계 문제 해결)
+- ✅ Stage 4: 사이트 관련 이상치 탐지 정확도 향상
+
+#### 향후 재발 방지 가이드
+
+**CRITICAL: Semantic Keys와 실제 데이터 컬럼명 일치 확인**
+1. **Header Registry 수정 시**: 
+   - Aliases에서 항목 제거 시 실제 데이터에서 사용하는 컬럼명 확인 필수
+   - 특히 "MIR", "SHU" 같은 짧은 이름은 Description에도 나타나지만, 컬럼명으로도 사용됨
+   - Primary alias는 표준 형식, 마지막 alias는 실제 데이터 호환성용으로 분리
+
+2. **Semantic Matching 사용 시**:
+   - `find_header_by_meaning`은 primary alias를 반환 → 빈 컬럼일 수 있음
+   - 실제 데이터가 필요한 경우 **모든 aliases를 순회하며 데이터 확인 필수**
+   - 예: `for alias in definition.aliases: if alias in df.columns and df[alias].notna().sum() > 0:`
+
+3. **Stage 2 컬럼 검색**:
+   - `reorder_dataframe_columns` 이후에도 실제 데이터 컬럼 재확인
+   - Primary alias 의존 금지, 데이터 기반 검색 사용
+
+---
+
+## [4.0.49] - 2025-10-28
+
+### 🐛 Fixed - Stage 1 ORANGE 색상 저장 문제 해결
+
+#### 문제
+- ORANGE 색상 (83개 날짜 업데이트)이 메모리에서는 적용되었으나 실제 Excel 파일에 저장되지 않음
+- 원인 1: `_maintain_warehouse_order()`로 행 재정렬 후 `row_index`가 무효화됨
+- 원인 2: ORANGE 색상이 `FFC000` (황금색)으로 설정되어 검증 실패
+
+#### 해결 방법
+- **v4.0.47 case_no 수정 재적용**:
+  - `Change` 클래스에 `case_no: str = ""` 필드 추가 (Line 150)
+  - `ChangeTracker.add_change()`: `case_no` 파라미터 수락 (Line 182)
+  - `_apply_updates()`: 모든 `add_change()` 호출에 `case_no=key` 추가 (Lines 1346, 1365, 1391)
+  - `_apply_excel_formatting()`: `case_to_row` 매핑 구축 (Lines 1765-1790)
+  - `_apply_excel_formatting()`: `case_no`로 정확한 행 검색 후 색상 적용 (Lines 1808-1815)
+
+- **ORANGE 색상 수정**:
+  - Before: `ORANGE = "FFFFC000"` (황금색)
+  - After: `ORANGE = "FFFFA500"` (진짜 ORANGE)
+  - 검증 로직도 함께 업데이트 (Line 1897)
+
+#### 검증 결과
+- ✅ ORANGE 셀: 83개 (실제 파일에서 검증 완료)
+- ✅ YELLOW 셀: 71,039개
+- ✅ 전체 파이프라인: Stage 1-4 정상 실행
+
+#### 변경 파일
+- `scripts/stage1_sync_sorted/data_synchronizer_v30.py`:
+  - Line 67: ORANGE 색상 수정
+  - Line 150: `Change` dataclass에 `case_no` 필드 추가
+  - Line 182: `ChangeTracker.add_change` 메서드 업데이트
+  - Lines 1346, 1365, 1391: `_apply_updates`에서 `case_no` 기록
+  - Lines 1765-1790: `case_to_row` 매핑 구축
+  - Lines 1808-1815: `case_no` 기반 행 검색 및 색상 적용
+  - Line 1897: 검증 로직 ORANGE 색상 업데이트
+
+#### 백업
+- `backups/case_no_fix_20251028/data_synchronizer_v30.py.backup`
+
+#### 향후 재발 방지 가이드
+
+**CRITICAL: DataFrame 재정렬과 색상 적용 순서**
+
+Stage 1에서 DataFrame 재정렬을 수행하는 경우, 반드시 다음 원칙을 따라야 합니다:
+
+1. **색상 적용은 항상 최종 정렬 후에 수행**
+   - `_apply_updates()` → `_maintain_warehouse_order()` → `_apply_excel_formatting()` 순서 엄수
+   - 재정렬 전 `row_index`는 절대 신뢰하지 말 것
+
+2. **Case No. 기반 행 검색 필수**
+   - 모든 `Change` 객체에 `case_no` 필드 포함
+   - Excel 파일에서 Case No. 컬럼을 찾아 `case_to_row` 매핑 구축
+   - `row_index` 대신 `case_no`로 최종 행 위치 찾기
+
+3. **색상 코드 검증**
+   - ORANGE: `"FFFFA500"` (날짜 변경)
+   - YELLOW: `"FFFFFF00"` (신규 레코드)
+   - 색상 적용 후 반드시 실제 파일에서 검증할 것
+
+4. **검증 로직 통합**
+   - `wb.save()` 전에 검증 로직 실행
+   - `_matches_color()` 함수에서 올바른 색상 코드 사용
+   - 로그에 적용 개수와 검증 개수 모두 출력
+
+**개발자 체크리스트:**
+- [ ] Change 객체에 case_no 포함 여부 확인
+- [ ] case_to_row 매핑이 재정렬 후 DataFrame 기준인지 확인
+- [ ] 색상 코드가 올바른지 확인 (ORANGE: FFFFA500)
+- [ ] 실제 Excel 파일에서 색상 적용 검증
+- [ ] 로그와 실제 파일 불일치 시 즉시 조사
+
+---
+
 ## [4.0.48] - 2025-10-28
 
 ### ✨ Added - DSV Al Markaz Dashboard Ultimate Edition with Aisle Map & Bottleneck Analysis

@@ -62,9 +62,10 @@ from scripts.core import (
     HeaderRegistry,
     STAGE1_BASE_COLS_ORDER,
 )
+from scripts.core.standard_header_order import reorder_dataframe_columns
 
 # ===== Configuration =====
-ORANGE = "FFFFC000"  # Changed date cell (ARGB format)
+ORANGE = "FFFFA500"  # Changed date cell (ARGB format) - True ORANGE
 YELLOW = "FFFFFF00"  # New row (ARGB format)
 
 # Invalid header patterns to filter out
@@ -147,6 +148,7 @@ class Change:
     new_value: Any
     change_type: str  # "date_update" | "field_update" | "new_record"
     semantic_key: str = ""  # ✅ Phase 1: Semantic key for flexible column mapping
+    case_no: str = ""  # ✅ Phase 4: Case No. for correct row lookup after reordering
 
 
 @dataclass
@@ -176,6 +178,7 @@ class ChangeTracker:
                 new_value=kw.get("new_value"),
                 change_type=str(kw.get("change_type", "field_update")),
                 semantic_key=str(kw.get("semantic_key", "")),  # ✅ Phase 2: Include semantic_key
+                case_no=str(kw.get("case_no", "")),  # ✅ Phase 4: Include case_no
             )
         )
 
@@ -1336,8 +1339,9 @@ class DataSynchronizerV30:
                             wh.at[wi, w_col] = mval
                             self.change_tracker.add_change(
                                 row_index=wi,
-                                column_name=w_col,
+                                column_name=w_col,  # w_col is actual Excel header name (e.g., "ETD/ATD")
                                 semantic_key=semantic_key,  # ✅ Phase 3
+                                case_no=key,  # ✅ Phase 4: Include case_no for row lookup
                                 old_value=wval,
                                 new_value=mval,
                                 change_type="date_update",
@@ -1354,8 +1358,9 @@ class DataSynchronizerV30:
                             wh.at[wi, w_col] = mval
                             self.change_tracker.add_change(
                                 row_index=wi,
-                                column_name=w_col,
+                                column_name=w_col,  # w_col is actual Excel header name
                                 semantic_key=semantic_key,  # ✅ Phase 3
+                                case_no=key,  # ✅ Phase 4: Include case_no
                                 old_value=wval,
                                 new_value=mval,
                                 change_type="field_update",
@@ -1381,6 +1386,7 @@ class DataSynchronizerV30:
                             row_index=wi,
                             column_name=m_col,
                             semantic_key=semantic_key,  # ✅ Phase 3
+                            case_no=key,  # ✅ Phase 4: Include case_no
                             old_value=old_val,
                             new_value=mval,
                             change_type="master_only_update",
@@ -1593,7 +1599,7 @@ class DataSynchronizerV30:
                 )
             )
 
-            # Save all sheets
+            # Save all sheets with standard 63-column header order
             print(f"  Writing to: {Path(out).name}")
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
                 for sheet_name, (df, header_row) in processed_sheets.items():
@@ -1601,8 +1607,12 @@ class DataSynchronizerV30:
                     clean_sheet_name = sheet_name.replace("/", "_").replace("\\", "_")[
                         :31
                     ]  # Excel limit
-                    df.to_excel(writer, sheet_name=clean_sheet_name, index=False)
-                    print(f"    - {clean_sheet_name}: {len(df)} rows")
+                    # Apply standard 63-column header order before saving
+                    df_reordered = reorder_dataframe_columns(
+                        df, is_stage2=False, keep_unlisted=False, use_semantic_matching=True
+                    )
+                    df_reordered.to_excel(writer, sheet_name=clean_sheet_name, index=False)
+                    print(f"    - {clean_sheet_name}: {len(df)} rows, {len(df_reordered.columns)} columns (standard order)")
 
             print(f"  [OK] Saved {len(processed_sheets)} sheets")
 
@@ -1651,23 +1661,27 @@ class DataSynchronizerV30:
             print(f"  - 합쳐진 데이터: {len(merged_df)}행, {len(merged_df.columns)}컬럼")
             print(f"  - Source_Sheet 컬럼 추가됨")
 
-            # Save merged file
+            # Save merged file with standard 63-column header order
             merged_output_path = Path(out).with_name(
                 Path(out).stem.replace("_multi", "_merged") + ".xlsx"
             )
             if merged_output_path == Path(out):
                 # If no "_multi" in name, add "_merged" suffix
                 merged_output_path = Path(out).with_name(Path(out).stem + "_merged.xlsx")
+            # Apply standard 63-column header order before saving
+            merged_df_reordered = reorder_dataframe_columns(
+                merged_df, is_stage2=False, keep_unlisted=False, use_semantic_matching=True
+            )
             with pd.ExcelWriter(merged_output_path, engine="openpyxl") as writer:
-                merged_df.to_excel(writer, sheet_name="Merged Data", index=False)
+                merged_df_reordered.to_excel(writer, sheet_name="Merged Data", index=False)
 
-            print(f"[OK] 합쳐진 파일 저장: {merged_output_path.name}")
+            print(f"[OK] 합쳐진 파일 저장: {merged_output_path.name} (63개 헤더로 정리됨)")
 
             # Prepare result
             total_stats["output_file"] = out
             total_stats["merged_file"] = str(merged_output_path)
-            total_stats["merged_rows"] = len(merged_df)
-            total_stats["merged_columns"] = len(merged_df.columns)
+            total_stats["merged_rows"] = len(merged_df_reordered)
+            total_stats["merged_columns"] = len(merged_df_reordered.columns)
 
             print("\n" + "=" * 60)
             print("[OK] MULTI-SHEET SYNCHRONIZATION COMPLETE")
@@ -1755,19 +1769,36 @@ class DataSynchronizerV30:
             ws = wb[sheet_name]
 
             # Excel rows are 1-indexed, and we need to account for header
-            excel_header_row = header_row + 1
-            print(f"      [DEBUG] Excel header row: {excel_header_row}")
+            # FIX: Always use row 1 as header (actual Excel header row)
+            excel_header_row = 1
+            print(f"      [DEBUG] Excel header row: {excel_header_row} (fixed)")
 
             # Build header map
             header_map = {}
+            case_no_col_idx = None
             for c_idx, cell in enumerate(ws[excel_header_row], start=1):
                 if cell.value is None:
                     continue
-                header_map[str(cell.value).strip()] = c_idx
+                header_name = str(cell.value).strip()
+                header_map[header_name] = c_idx
+                
+                # Find Case No. column
+                if "Case" in header_name and "No" in header_name:
+                    case_no_col_idx = c_idx
 
             print(
                 f"      [DEBUG] Header map size: {len(header_map)}, first 5: {list(header_map.keys())[:5]}"
             )
+            print(f"      [DEBUG] Case No. column index: {case_no_col_idx}")
+            
+            # ✅ Phase 4: Build Case No. → Excel row mapping
+            case_to_row = {}
+            if case_no_col_idx:
+                for row_idx in range(excel_header_row + 1, ws.max_row + 1):
+                    case_no_cell = ws.cell(row=row_idx, column=case_no_col_idx)
+                    if case_no_cell.value:
+                        case_to_row[str(case_no_cell.value).strip()] = row_idx
+                print(f"      [DEBUG] Built case_to_row mapping: {len(case_to_row)} cases")
 
             # Define fills
             orange_fill = PatternFill(start_color=ORANGE, end_color=ORANGE, fill_type="solid")
@@ -1784,7 +1815,14 @@ class DataSynchronizerV30:
                 if change.change_type != "date_update":
                     continue
 
-                excel_row = change.row_index + excel_header_row + 1
+                # ✅ Phase 4: Use case_no to find correct row after reordering
+                if change.case_no and change.case_no in case_to_row:
+                    excel_row = case_to_row[change.case_no]
+                else:
+                    # Fallback to old method if case_no not available
+                    excel_row = change.row_index + excel_header_row + 1
+                    if change.case_no:
+                        print(f"      [WARN] Case No. '{change.case_no}' not found in case_to_row mapping")
 
                 # Level 1: Use semantic key mapping (most accurate)
                 actual_col_name = self.change_tracker.get_column_name(
@@ -1865,7 +1903,7 @@ class DataSynchronizerV30:
                 verify_orange = 0
                 for row_idx, col_idx in orange_cells:
                     cell = ws_verify.cell(row=row_idx, column=col_idx)
-                    if _matches_color(cell.fill, ("FFFFC000", "FFC000", "00FFC000")):
+                    if _matches_color(cell.fill, ("FFFFA500", "FFA500", "00FFA500")):
                         verify_orange += 1
 
                 verify_yellow = 0

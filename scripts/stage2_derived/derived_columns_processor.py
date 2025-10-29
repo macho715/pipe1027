@@ -200,8 +200,27 @@ def calculate_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
     """파생 컬럼을 계산합니다. / Compute derived columns."""
     working_df = df.copy()
 
-    wh_cols = [c for c in WAREHOUSE_COLUMNS if c in working_df.columns]
-    st_cols = [c for c in SITE_COLUMNS if c in working_df.columns]
+    # ✅ Find columns with actual data by checking all possible aliases
+    from core import HVDC_HEADER_REGISTRY
+    
+    wh_cols = []
+    for wh_key in ['dhl_wh', 'dsv_indoor', 'dsv_al_markaz', 'aaa_storage', 
+                   'dsv_outdoor', 'dsv_mzp', 'mosb', 'hauler_indoor', 'jdn_mzd']:
+        definition = HVDC_HEADER_REGISTRY.get_definition(wh_key)
+        # Check all aliases and find the one with data
+        for alias in definition.aliases:
+            if alias in working_df.columns and working_df[alias].notna().sum() > 0:
+                wh_cols.append(alias)
+                break  # Use first alias with data
+    
+    st_cols = []
+    for site_key in ['mir', 'shu', 'das', 'agi']:
+        definition = HVDC_HEADER_REGISTRY.get_definition(site_key)
+        # Check all aliases and find the one with data
+        for alias in definition.aliases:
+            if alias in working_df.columns and working_df[alias].notna().sum() > 0:
+                st_cols.append(alias)
+                break  # Use first alias with data
 
     _to_datetime_columns(working_df, wh_cols + st_cols)
 
@@ -433,11 +452,30 @@ def process_derived_columns(
     df = reorder_dataframe_columns(df, is_stage2=True, use_semantic_matching=True)
     print(f"  [SUCCESS] 재정렬 완료: {len(df.columns)}개 컬럼")
 
-    wh_cols = [c for c in WAREHOUSE_COLUMNS if c in df.columns]
-    st_cols = [c for c in SITE_COLUMNS if c in df.columns]
+    # ✅ Find columns with actual data by checking all possible aliases
+    from core import HVDC_HEADER_REGISTRY
+    
+    wh_cols_found = []
+    for wh_key in ['dhl_wh', 'dsv_indoor', 'dsv_al_markaz', 'aaa_storage', 
+                   'dsv_outdoor', 'dsv_mzp', 'mosb', 'hauler_indoor', 'jdn_mzd']:
+        definition = HVDC_HEADER_REGISTRY.get_definition(wh_key)
+        # Check all aliases and find the one with data
+        for alias in definition.aliases:
+            if alias in df.columns and df[alias].notna().sum() > 0:
+                wh_cols_found.append(alias)
+                break  # Use first alias with data
+    
+    st_cols_found = []
+    for site_key in ['mir', 'shu', 'das', 'agi']:
+        definition = HVDC_HEADER_REGISTRY.get_definition(site_key)
+        # Check all aliases and find the one with data
+        for alias in definition.aliases:
+            if alias in df.columns and df[alias].notna().sum() > 0:
+                st_cols_found.append(alias)
+                break  # Use first alias with data
 
-    print(f"Warehouse 컬럼: {len(wh_cols)}개 - {wh_cols}")
-    print(f"Site 컬럼: {len(st_cols)}개 - {st_cols}")
+    print(f"Warehouse 컬럼: {len(wh_cols_found)}개 - {wh_cols_found}")
+    print(f"Site 컬럼: {len(st_cols_found)}개 - {st_cols_found}")
 
     print(
         "SUCCESS: 파생 컬럼 %s개 계산 완료 (행: %s, 컬럼: %s)"
