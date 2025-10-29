@@ -227,6 +227,26 @@ class HeaderRegistry:
             )
         )
 
+        # Site name (not date) - distinguishes from site location date columns
+        self.register(
+            HeaderDefinition(
+                semantic_key="site_name",
+                category=HeaderCategory.IDENTIFICATION,
+                aliases=[
+                    "Site",
+                    "Site Name",
+                    "SiteName",
+                    "Site_Name",
+                    "사이트",
+                    "현장",
+                    "현장명",
+                ],
+                description="Site name identification (not a date column)",
+                required=False,
+                data_type="str",
+            )
+        )
+
         # ===== TEMPORAL HEADERS =====
         # Date and time related fields
 
@@ -361,12 +381,13 @@ class HeaderRegistry:
 
         # ===== LOCATION HEADERS - SITES =====
         # Final installation sites
+        # Primary alias를 "MIR"로 설정 (63개 헤더 표준 준수)
 
         site_locations = [
-            ("mir", "MIR Site", ["MIR", "MIR Site", "MIR_Site", "MIR사이트"]),
-            ("shu", "SHU Site", ["SHU", "SHU Site", "SHU_Site", "SHU사이트"]),
-            ("agi", "AGI Site", ["AGI", "AGI Site", "AGI_Site", "AGI사이트"]),
-            ("das", "DAS Site", ["DAS", "DAS Site", "DAS_Site", "DAS사이트"]),
+            ("mir", "MIR", ["MIR", "MIR Site", "MIR_Site", "MIR사이트"]),  # Primary: "MIR" (63개 헤더 표준)
+            ("shu", "SHU", ["SHU", "SHU Site", "SHU_Site", "SHU사이트"]),  # Primary: "SHU" (63개 헤더 표준)
+            ("agi", "AGI", ["AGI", "AGI Site", "AGI_Site", "AGI사이트"]),  # Primary: "AGI" (63개 헤더 표준)
+            ("das", "DAS", ["DAS", "DAS Site", "DAS_Site", "DAS사이트"]),  # Primary: "DAS" (63개 헤더 표준)
             ("shifting", "Shifting", ["Shifting", "SHIFTING", "Shift", "이동"]),
         ]
 

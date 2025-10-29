@@ -23,7 +23,7 @@ from .semantic_matcher import SemanticMatcher
 
 logger = logging.getLogger(__name__)
 
-# 실제 "통합_원본데이터_Fixed" 시트 기준 표준 헤더 순서 (64개)
+# 실제 "통합_원본데이터_Fixed" 시트 기준 표준 헤더 순서 (63개)
 STANDARD_HEADER_ORDER = [
     # 기본 식별 정보
     "no.",
@@ -80,8 +80,7 @@ STANDARD_HEADER_ORDER = [
     "Status_Location_Date",
     "Status_Storage",
     # Handling 정보 (파생 컬럼)
-    "wh_handling_legacy",  # Stage 3에서 "wh handling"을 이 이름으로 변경
-    "site handling",  # 공백 1개
+    "wh_handling",  # Stage 3에서 사용하는 실제 컬럼명
     "total handling",
     "minus",
     "final handling",
@@ -99,8 +98,7 @@ STANDARD_HEADER_ORDER = [
     "FLOW_CODE",
     "FLOW_DESCRIPTION",
     "Final_Location",
-    # 입고일자
-    "입고일자",
+    "Source_Vendor",
 ]
 
 # Stage 1 전용: 기본 컬럼 순서 (창고/현장 컬럼 제외)
@@ -611,20 +609,20 @@ def validate_sqm_stack_presence(df: pd.DataFrame) -> dict:
 def normalize_header_names_for_stage3(df: pd.DataFrame) -> pd.DataFrame:
     """
     Stage 2와 Stage 3 간 헤더명 차이를 정규화 (Stage 3 전용)
-
+    
     변환:
     - "No" → "no."
-    - "wh handling" → "wh_handling_legacy"
     - "site  handling" (공백 2개) → "site handling" (공백 1개)
     - 중복 "no" 컬럼 제거 (no.와 no가 동시에 존재하는 경우)
+    
+    주의: wh_handling_legacy 변환 제거 (63개 헤더 유지)
     """
     renamed = {}
 
     for col in df.columns:
         if col == "No":
             renamed[col] = "no."
-        elif col == "wh handling":
-            renamed[col] = "wh_handling_legacy"
+        # wh_handling_legacy 변환 제거 - 63개 헤더 유지
         elif col == "site  handling":
             renamed[col] = "site handling"
 

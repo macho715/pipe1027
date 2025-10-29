@@ -756,16 +756,26 @@ def create_dashboard(df, inbound_flow, outbound_flow, metrics):
         in_piv = df_in.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
         fig.add_trace(
             go.Heatmap(
-                z=in_piv.values, x=in_piv.columns, y=in_piv.index, colorscale="Greens", name="Inbound"
+                z=in_piv.values,
+                x=in_piv.columns,
+                y=in_piv.index,
+                colorscale="Greens",
+                name="Inbound",
             ),
             row=heatmap_row,
             col=1,
         )
 
-        out_piv = df_out.pivot_table(index="Location", columns="Month", values="Count", fill_value=0)
+        out_piv = df_out.pivot_table(
+            index="Location", columns="Month", values="Count", fill_value=0
+        )
         fig.add_trace(
             go.Heatmap(
-                z=out_piv.values, x=out_piv.columns, y=out_piv.index, colorscale="Reds", name="Outbound"
+                z=out_piv.values,
+                x=out_piv.columns,
+                y=out_piv.index,
+                colorscale="Reds",
+                name="Outbound",
             ),
             row=heatmap_row,
             col=2,

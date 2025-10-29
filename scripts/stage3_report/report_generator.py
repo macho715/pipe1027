@@ -757,14 +757,14 @@ class CorrectedWarehouseIOCalculator:
         WH_COLS = [w for w in self.warehouse_columns if w != "MOSB"]
         MOSB_COLS = [w for w in self.warehouse_columns if w == "MOSB"]
 
-        # ① wh handling 값은 별도 보존 (원본 유지)
+        # ① wh handling 값은 별도 보존 (원본 유지) - wh_handling_legacy 제거
         if "wh handling" in self.combined_data.columns:
-            #  FIX 3: 원본 데이터 우선 보존
+            #  FIX 3: 원본 데이터 우선 보존 (wh_handling_legacy 생성하지 않음)
             original_wh_handling = self.combined_data["wh handling"].copy()
             self.combined_data["wh_handling_original"] = original_wh_handling
-            self.combined_data.rename(columns={"wh handling": "wh_handling_legacy"}, inplace=True)
+            # wh_handling_legacy 컬럼 생성 제거 - 63개 헤더 유지
             logger.info(
-                " 기존 'wh handling' 컬럼을 'wh_handling_original'과 'wh_handling_legacy'로 보존"
+                " 기존 'wh handling' 컬럼을 'wh_handling_original'으로만 보존 (wh_handling_legacy 제거)"
             )
 
         # ② 0값과 빈 문자열을 NaN으로 치환 (notna() 오류 방지)
@@ -1485,19 +1485,21 @@ class CorrectedWarehouseIOCalculator:
         """
         logger.info(" 수정된 창고 재고 계산 시작 (고성능 Pandas 버전)")
 
-        #  1. Status_Location 재고 (월말 기준)
+        #  1. Status_Location 재고 (월말 기준) - 입고일자 컬럼 생성 제거
         if "Status_Location" in df.columns:
-            # 입고일자 컬럼 찾기 (가장 최근 날짜 컬럼 사용)
+            # 입고일자 컬럼 생성 제거 - 63개 헤더 유지
+            # 기존 날짜 컬럼을 직접 사용하여 계산
             date_columns = [
                 col for col in df.columns if col in self.warehouse_columns + self.site_columns
             ]
             if date_columns:
                 # 가장 많은 데이터가 있는 날짜 컬럼을 기준으로 사용
                 primary_date_col = max(date_columns, key=lambda x: df[x].notna().sum())
-                df["입고일자"] = pd.to_datetime(df[primary_date_col], errors="coerce")
+                # 입고일자 컬럼 생성하지 않고 직접 사용
+                df[primary_date_col] = pd.to_datetime(df[primary_date_col], errors="coerce")
 
                 status_inv = (
-                    df.groupby(["Status_Location", pd.Grouper(key="입고일자", freq="M")])["Pkg"]
+                    df.groupby(["Status_Location", pd.Grouper(key=primary_date_col, freq="M")])["Pkg"]
                     .sum()
                     .rename("status_inventory")
                 )
@@ -3893,19 +3895,19 @@ class HVDCExcelReporterFinal:
         # ✅ Stage 3 헤더명 정규화 및 표준 순서 적용
         logger.info(" 통합_원본데이터_Fixed 시트 생성 - 유연한 헤더 검색 및 표준 순서 적용")
 
-        # HITACHI 데이터 처리
+        # HITACHI 데이터 처리 - keep_unlisted=False로 설정하여 63개 헤더 유지
         hitachi_normalized = normalize_header_names_for_stage3(hitachi_original)
         hitachi_reordered = reorder_dataframe_columns(
-            hitachi_normalized, is_stage2=False, use_semantic_matching=True
+            hitachi_normalized, is_stage2=False, keep_unlisted=False, use_semantic_matching=True
         )
 
-        # SIEMENS 데이터 처리
+        # SIEMENS 데이터 처리 - keep_unlisted=False로 설정하여 63개 헤더 유지
         siemens_normalized = normalize_header_names_for_stage3(siemens_original)
         siemens_reordered = reorder_dataframe_columns(
-            siemens_normalized, is_stage2=False, use_semantic_matching=True
+            siemens_normalized, is_stage2=False, keep_unlisted=False, use_semantic_matching=True
         )
 
-        # 통합 데이터 처리
+        # 통합 데이터 처리 - keep_unlisted=False로 설정하여 63개 헤더 유지
         combined_normalized = normalize_header_names_for_stage3(combined_original)
 
         # ✅ Stage 3 신규 컬럼 추가 (통합 데이터에만)
@@ -3929,7 +3931,7 @@ class HVDCExcelReporterFinal:
         logger.info(f"  - 'SQM' 존재: {'SQM' in combined_normalized.columns}")
 
         combined_reordered = reorder_dataframe_columns(
-            combined_normalized, is_stage2=False, use_semantic_matching=True
+            combined_normalized, is_stage2=False, keep_unlisted=False, use_semantic_matching=True
         )
 
         # 🔍 디버그: 재정렬 후 상태 확인
