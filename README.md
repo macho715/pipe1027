@@ -1,10 +1,134 @@
-# HVDC Pipeline v4.0.48
+# HVDC Pipeline v4.0.52
 
 **Samsung C&T Logistics | ADNOC·DSV Partnership**
 
 통합된 HVDC 파이프라인으로 데이터 동기화부터 이상치 탐지까지 전체 프로세스를 자동화합니다.
 
 ## 🚀 최근 업데이트
+
+### v4.0.52 - 전체 파이프라인 헤더 표준 63개로 통일 (2025-10-29)
+
+#### 🎯 헤더 표준화 작업 완료
+
+**주요 성과**:
+- 전체 파이프라인(Stage 1-4)의 출력 파일 헤더를 **표준 63개로 통일**
+- Stage 1: 68-69개 → **63개** ✅
+- Stage 3: 70개 → **63개** ✅
+- Stage 2: 64개 (파생 컬럼 포함, 정상)
+
+**제거된 불필요한 컬럼 (6개)**:
+- `입고일자`, `MIR Site`, `SHU Site`, `DAS Site`, `AGI Site`, `wh_handling_legacy.1`
+
+**주요 변경사항**:
+- `header_registry.py`: Site 컬럼 primary alias를 단축명("MIR" 등)으로 변경
+- `data_synchronizer_v30.py`: `reorder_dataframe_columns` 적용으로 Stage 1 출력 표준화
+- `report_generator.py`: `keep_unlisted=False` 적용으로 불필요한 컬럼 자동 제거
+
+**검증 완료**:
+- ✅ Stage 1 (merged): 63개 헤더
+- ✅ Stage 3: 63개 헤더
+- ✅ 표준 헤더 순서와 100% 일치
+
+**기술적 개선**:
+- `keep_unlisted=False` 옵션으로 자동 정리 시스템 구축
+- Semantic Matching 활용으로 헤더명 변형에도 유연하게 대응
+
+---
+
+### v4.0.51 - 프로젝트 전체 중복예전파일 정리 완료 (2025-10-29)
+
+#### 🧹 Cleanup - 프로젝트 구조 대폭 정리
+
+**정리 결과:**
+- **삭제된 파일**: 약 50개 (중복 실행 파일, 임시 파일, 백업 파일 등)
+- **루트 디렉토리**: 대폭 정리로 구조 명확화
+- **run/ 폴더**: 실행 스크립트만 보존, config 중복 제거
+- **archive/notebooks/**: 분석 완료된 노트북 정리
+
+**주요 변경사항:**
+- `run/run_pipeline.py` 경로 수정 (상위 config/ 폴더 참조)
+- 루트 실행 파일 중복 제거 (run/ 폴더와 동일)
+- 임시/검증 파일 정리 (7개)
+- data - 복사본/ 폴더 삭제 (22개 파일)
+- backups/ 폴더 정리 (3개 하위 폴더)
+
+**실행 방법:**
+```bash
+# 방법 1: run/ 폴더에서 실행
+cd run
+python run_pipeline.py --all
+
+# 방법 2: 루트에서 직접 실행
+python run/run_pipeline.py --all
+```
+
+**검증 완료:**
+- ✅ Stage 1 실행 성공 (67.79초)
+- ✅ config 파일 경로 정상 작동
+- ✅ 전체 파이프라인 구조 정상
+
+### v4.0.50 - Stage 2 사이트 컬럼 인식 수정 (2025-10-28)
+
+#### 🐛 Fixed - 사이트 위치 인식 문제 완전 해결
+
+**문제점**
+- Stage 2에서 사이트 위치(MIR/SHU/DAS/AGI)를 전혀 인식하지 못함
+- `Status_Location`: 창고만 표시 (5,141개), 사이트 0개
+- 실제 데이터: 5,702개 사이트 날짜가 존재
+
+**근본 원인**
+- Header Registry에서 standalone 사이트 이름("MIR", "SHU" 등)이 aliases에서 제거됨
+- Semantic Matcher가 빈 primary alias ("MIR Site")만 반환
+- Stage 2 컬럼 검색이 실제 데이터가 있는 "MIR" 컬럼을 찾지 못함
+
+**해결 방법**
+1. Header Registry에 standalone names 재추가 (`scripts/core/header_registry.py`)
+2. Stage 2에서 모든 aliases를 확인하여 데이터가 있는 컬럼 찾기 (`scripts/stage2_derived/derived_columns_processor.py`)
+
+**검증 결과**
+- ✅ **사이트 위치**: 5,701개 (63.4%) - MIR: 1,524 | SHU: 2,207 | DAS: 1,731 | AGI: 239
+- ✅ **Status_Current**: "site" 5,701개 정확히 반영
+- ✅ **창고 위치**: 3,121개 (사이트로 이동한 화물 반영)
+- ✅ **Pre Arrival**: 173개 (입고된 화물 반영)
+
+**영향 범위**
+- ✅ Stage 2: 위치 정확도 대폭 향상
+- ✅ Stage 3: 사이트별 집계 정확도 향상
+- ✅ Stage 4: 사이트 관련 이상치 탐지 정확도 향상
+
+**재발 방지**
+- Header Registry 수정 시 실제 데이터 컬럼명 확인 필수
+- Semantic Matching 사용 시 모든 aliases 순회하며 데이터 확인 필수
+
+---
+
+### v4.0.49 - Stage 1 ORANGE 색상 저장 수정 (2025-10-28)
+
+#### 🐛 Fixed - ORANGE 색상 저장 문제 완전 해결
+
+**문제점**
+- ORANGE 색상 (83개 날짜 업데이트)이 메모리에서는 적용되었으나 실제 Excel 파일에는 저장되지 않음
+- ORANGE 색상이 황금색(FFC000)으로 잘못 설정되어 검증 실패
+
+**해결 방법**
+- v4.0.47의 case_no 기반 행 검색 로직 재적용
+- ORANGE 색상을 진짜 ORANGE(FFFFA500)로 수정
+- 행 재정렬 후에도 올바른 셀에 색상 적용 보장
+
+**검증 결과**
+- ✅ ORANGE 셀: 83개 (실제 파일 확인 완료)
+- ✅ YELLOW 셀: 71,039개
+- ✅ 전체 파이프라인: Stage 1-4 정상 실행
+
+**변경 파일**
+- `scripts/stage1_sync_sorted/data_synchronizer_v30.py` (7개 위치 수정)
+
+**재발 방지**
+- DataFrame 재정렬 후 색상 적용 시 반드시 Case No. 기반 행 검색 사용
+- 색상 코드: ORANGE(FFFFA500), YELLOW(FFFFFF00)
+- 색상 적용 후 실제 파일 검증 필수
+
+---
 
 ### v4.0.48 - DSV Al Markaz Dashboard Ultimate Edition (2025-10-28)
 
@@ -967,6 +1091,6 @@ tail -f logs/pipeline.log
 
 ---
 
-**버전**: v4.0.38 (HAULER 중복 제거 패치)
-**최종 업데이트**: 2025-10-27
+**버전**: v4.0.52 (헤더 표준 63개로 통일)
+**최종 업데이트**: 2025-10-29
 **문의**: AI Development Team

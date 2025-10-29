@@ -1,37 +1,5 @@
 # 헤더 매칭 시스템 통합 가이드 (HVDC Pipeline Core Module)
 
-## 📅 최근 업데이트 (v4.0.51 - 2025-10-29)
-
-### 프로젝트 구조 개선
-파이프라인 실행 경로가 개선되었습니다:
-
-**이전**:
-```bash
-python run_pipeline.py --all
-```
-
-**현재**:
-```bash
-python run/run_pipeline.py --all
-```
-
-### 문서 위치 변경
-- 패치 문서: `scripts/PATCH.MD` → `docs/reports/STAGE3_EXCEL_WRITER_FIX_v4.0.22.md`
-- 패치 문서: `scripts/WHINOUT.MD` → `docs/reports/STAGE3_INBOUND_CALCULATION_FIX_v4.0.29.md`
-- 중복 코드: `stack status.md`, `STACK.MD` 삭제 (이미 구현됨)
-
-### 실행 방법 개선
-```bash
-# 권장 방법 (프로젝트 루트에서)
-python run/run_pipeline.py --all
-
-# 또는 run/ 폴더 내에서
-cd run
-python run_pipeline.py --all
-```
-
----
-
 ## 📚 목차
 
 1. [시스템 개요](#시스템-개요)
@@ -42,10 +10,9 @@ python run_pipeline.py --all
 6. [문제 해결](#문제-해결)
 7. [마이그레이션 가이드](#마이그레이션-가이드)
 
-### Core 모듈 상세 설명
-자세한 모듈 설명과 API 문서는 `README.md`를 참조하세요.
-
 ---
+
+## 시스템 개요
 
 ### 무엇이 개선되었나요?
 
@@ -792,13 +759,6 @@ python -m core.header_normalizer
 python -m core.header_detector
 python -m core.header_registry
 python -m core.semantic_matcher
-
-# 전체 파이프라인 테스트 (권장 방법)
-python run/run_pipeline.py --all
-
-# 또는 run/ 폴더 내에서
-cd run
-python run_pipeline.py --all
 ```
 
 ### 새로운 헤더 추가하기

@@ -20,9 +20,9 @@ stages:
     description: 원본 데이터 동기화 및 정제
     enabled: true
     io:
-      master_file: data/raw/CASE LIST.xlsx
+      master_file: data/raw/HITACHI/Case List_Hitachi.xlsx
       output_file: data/processed/synced/HVDC WAREHOUSE_HITACHI(HE).synced_v3.4.xlsx
-      warehouse_file: data/raw/HVDC WAREHOUSE_HITACHI(HE).xlsx
+      warehouse_file: data/raw/HITACHI/HVDC WAREHOUSE_HITACHI(HE).xlsx
     name: Data Synchronization
     sorting:
       enabled: true
